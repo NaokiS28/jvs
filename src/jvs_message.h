@@ -27,6 +27,8 @@ typedef enum {
     _unknown, _asciiNumeric, _asciiAlpha, _asciiKatakana, _asciiKanji
 } characterOutputType;
 
+// Generic constructor for JVS infomation.
+// This  will also serve as a store for data.
 
 struct JVS_Info {
     char _ident[102] = {"JVS I/O"};
@@ -34,6 +36,8 @@ struct JVS_Info {
     uint8_t _cmdRev = 13;
     uint8_t _jvsRev = 30;
     uint8_t _comRev = 10;
+    uint8_t _numOfFeatures = 16;    // Most amount of features supported
+    
     featureTypes _featureSupport[16] = {
         _switchInput, _coinInput, _analogInput, _gpOutput
     };
