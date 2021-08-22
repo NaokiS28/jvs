@@ -1,6 +1,9 @@
 # jvs
 ### This is still WIP and may not work correctly!
-This is a WIP library for communicating over the JVS protocol in Arduino compatible boards. This library supports both Master mode and Node/Device mode. It requires one hardware UART to work connected to an RS485 transceiver.
+This is a WIP library for communicating over the JVS protocol in Arduino compatible boards. This library supports both Master mode and Node/Device mode. It requires one hardware UART to work connected to an RS485 transceiver such as the MAX RS485 TTL converter module.
+
+You will also need to connect the sense pin to pin 1 of USB-A connector. This should be pulled to ground with a 10kΩ resistor to GND on the input port. A master can only have 1 input port per instance, a device must have 1 ouput port but may optionally have an input port for daisy chaning IO devices. The data lines are connected between ports, the sense line must connect to an output for the output port and an input for the input port.
+
 
 ## Usage
 To use the library, include it before setup and then declare an instance by passing a UART port and the sense pin input/output. On Arduino UNO this will be Serial, but on board with multiple serial ports, you can use Serial2, Serial 3 etc. You cannot use SerialUSB. **Note you can only have one instance at one time**.
