@@ -131,7 +131,7 @@ class JVS {
     // IO
     byte machineSwitches = 0;       // Button storage for cab switches: 
         // From MSB->LSB: 7: Test, 6: Tilt 1, 5: Tilt 2, 4: Tilt 3, 3-0: Unused
-    byte* playerArray = 0;          // Pointer to player array. This is read as:
+    byte* playerArray = NULL;          // Pointer to player array. This is read as:
     /* byte playerSwitches[4][2] = {
         // Player 1, note that this is single stick. Dual stick uses buttons 1-4 for UDLR
         // Mahjong uses stick and buttons on byte 0 for A-F (Bits 5 - 0), byte 1 for G-N (Bits 7-0)
@@ -143,7 +143,7 @@ class JVS {
         {0,0},      // Player 3
         {0,0}       // Player 4
     } */
-    byte* coinSlots = 0;            // Pointer to coin slot array, read as:
+    byte* coinSlots = NULL;            // Pointer to coin slot array, read as:
     /* byte coinSlots[2][2] = {
         {           // Slot 1
             0,      // MSBFIRST 7-6: Coin condition, 5-0: Coin counter MSB

@@ -662,9 +662,9 @@ int JVS::runCommand(JVS_Frame &received){
                         response.data[dataCount++] = machineSwitches; // Test SW, TILT
                         for(int p = temp; p < _info->featureParameters[0][0]; p++){
                             // Player number
-                            if(playerArray != 0){
-                                response.data[dataCount++] = playerArray[p][0];
-                                response.data[dataCount++] = playerArray[p][1];
+                            if(playerArray != NULL){
+                                response.data[dataCount++] = (*(playerArray+p)+0);
+                                response.data[dataCount++] = (*(playerArray+p)+1);
                             } else {
                                 response.data[dataCount++] = 0;
                                 response.data[dataCount++] = 0;
