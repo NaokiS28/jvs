@@ -1,4 +1,4 @@
-# jvs
+# JVS ArduinIO
 ### This is still WIP and may not work correctly!
 This is a WIP library for communicating over the JVS protocol in Arduino compatible boards. This library supports both Master mode and Node/Device mode. It requires one hardware UART to work connected to an RS485 transceiver such as the MAX RS485 TTL converter module.
 
