@@ -4,6 +4,23 @@ This is a WIP library for communicating over the JVS protocol in Arduino compati
 
 You will also need to connect the sense pin to pin 1 of USB-A connector. This should be pulled to ground with a 1kΩ resistor to GND on the input port. A master can only have 1 input port per instance, a device must have 1 ouput port but may optionally have an input port for daisy chaning IO devices. The data lines are connected between ports, the sense line must connect to an output for the output port and an input for the input port.
 
+## Hardware
+# Device mode
+This library requires a MAX485 transceiver or equivalent connected to the serial port RX and TX pins. You also need to specify an RTS (Request to Send) pin which is connected to both DE and ~RE.
+
+Finally, in device mode you will either need a transistor (BC547 or 2n2222 or eqv.) for pulling the sense line low; whilst you can use the IO pin directly, it is better practice to do it this way and the library would need to be changed to uninvert the pin. 
+
+Here is an example with downstream IO sensing which is needed for daisychaining.
+![alt text](https://github.com/NaokiS28/jvs/doc/JVS-Phy.png?raw=true)
+
+# Master mode
+In master mode, it is advised to use an LM393 opamp to handle 5V, 2.5v and 0v sensing. This allows one to use one pin to sense IO status (Present with/out ID, not present).
+
+The SEGA/Nintendo/Namco Triforce does single pin sensing which is good enough for most use cases:
+![alt text](https://github.com/NaokiS28/jvs/doc/triforce-host.png?raw=true)
+
+Another option is to remove the AND gate and use two pins for better sensing. This allows one to know exactly the state of the sense in pin, be it IO board not connected, IO is present with no ID or present and ID'd. The SEGA Chihiro uses a verison of this sensing:
+![alt text](https://github.com/NaokiS28/jvs/doc/chihiro-host.png?raw=true)
 
 ## Usage
 To use the library, include it before setup and then declare an instance by passing a UART port and the sense pin input/output. On Arduino UNO this will be Serial, but on board with multiple serial ports, you can use Serial2, Serial 3 etc. You cannot use SerialUSB. **Note you can only have one instance at one time**.
