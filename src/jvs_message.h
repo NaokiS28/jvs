@@ -4,45 +4,42 @@
 #include <Arduino.h>
 
 struct JVS_Frame {
-    uint8_t _sync = 0xE0;
-    uint8_t _nodeID;
-    uint8_t _numBytes;          // Includes all data bytes and sync
-    union {
-        uint32_t data32 [2]    ; // Caution: subject to endianness
-        uint16_t data16 [4]    ; // Caution: subject to endianness
-        uint8_t data8   [8]    ;
-        uint8_t data    [2]    ; // Most messages will use 2 bytes
-        uint8_t dataString [104] = {""} ;
+    uint8_t sync = 0xE0;
+    uint8_t nodeID = 0;
+    uint8_t numBytes = 0;          // Includes all data bytes and sync
+    uint8_t statusCode = 1;
+    union{
+        uint8_t data [254] = {0};
+        uint16_t data16 [127];
+        char dataString [102];
     } ;
-    uint8_t _sum;               // Checksum of ID, numbytes, data bytes
+    uint8_t sum = 0;                // Checksum of ID, numbytes, data bytes
+    uint8_t cmdCount = 1;           // Number of commands counted. Only counts standard frames
 };
 
 typedef enum {
-    _endCode, _switchInput, _coinInput, _analogInput, _keycodeInput,
-    _screenPosInput, _miscInput, _cardSlots, _medalOutputs, _gpOutput,
-    _analogOutput, _characterOuput, _backupSupport
+    endCode, switchInput, coinInput, analogInput, rotaryInput, keycodeInput,
+    screenPosInput, miscInput, reserved1, reserved2, cardSlots, medalOutputs, gpOutput,
+    analogOutput, characterOuput, backupSupport
 } featureTypes;
 
 typedef enum {
-    _unknown, _asciiNumeric, _asciiAlpha, _asciiKatakana, _asciiKanji
+    unknown, asciiNumeric, asciiAlpha, asciiKatakana, asciiKanji
 } characterOutputType;
 
-// Generic constructor for JVS infomation.
-// This  will also serve as a store for data.
-
+//
 struct JVS_Info {
-    char _ident[102] = {"JVS I/O"};
-    char _mainID[102] = {"Generic JVS Game"};
-    uint8_t _cmdRev = 13;
-    uint8_t _jvsRev = 30;
-    uint8_t _comRev = 10;
-    uint8_t _numOfFeatures = 16;    // Most amount of features supported
-    
-    featureTypes _featureSupport[16] = {
-        _switchInput, _coinInput, _analogInput, _gpOutput
+    char ident[100] = {"JVS IO Library;github.com/NaokiS28/jvs;VER:0.1 Beta"};
+    char mainID[100] = {"Generic JVS Game"};
+    uint8_t cmdRev = 11;    // Some JVS hosts (Triforce) will report ver 0.0 if it's higher than 1.1
+    uint8_t jvsRev = 30;
+    uint8_t comRev = 10;
+    uint8_t totalFeatures = 4;
+    featureTypes featureSupport[16] = {
+        switchInput, coinInput, analogInput, gpOutput
     };
-    uint8_t _featureParameters[16][3] = {
-        {2, 12, 0},     // Is _switchInput in generic construction
+    uint8_t featureParameters[16][3] = {
+        {2, 12, 0},     // Is switchInput in generic construction
         {2, 0, 0},      // 2 Coin slots
         {6, 10, 0},     // 6 ADCs, 10-Bit resolution
         {8, 0, 0}       // 8 GPOs (general purpose output)

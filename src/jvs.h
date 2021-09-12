@@ -1,22 +1,52 @@
+/* 
+    JVS Protocol driver
+    NKS 2021
+
+    Sense out is timing specific. It must be set low like so:
+        If the IO board is the last in the chain:
+            Master -> Reset
+            Master -> Reset (within 20 ms)
+            Master -> SOF 
+            Device -> Set sense low
+            Master -> Rest of ID packet.
+        
+        If the IO board is NOT the last in the chain:
+            Set sense low after receiving SOF and sense input is low.
+*/
+
 #ifndef JVS_H
 #define JVS_H
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include <jvs_message.h>
-#include <jvs_buffer.h>
+#include <jvs_commands.h>
+#include <CircularBuffer.h>
 
-/* 
-    JVS Protocol driver
-    NKS 2021
-*/
+// Debugging tools: Use with caution as they may break comms with some hosts
+//#define DBG_SERIAL Serial
+//#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
+//#define JVS_VERBOSE_LOG_FRAME     // Enables frame logging but will break comms with certain hosts
+//#define JVS_VERBOSE_LOG_CMG       // Same as above but for command packet decoder
+
+#define BUFFER_FULL         1
+#define BUFFER_ADD_ERROR    2
+#define BUFFER_READ_ERROR   3
+
+#define JVS_SENSE_INACTIVE  0
+#define JVS_SENSE_ACTIVE    1
+
+#define MASTER_NODE         1
+#define DEVICE_NODE         0
 
 #define JVS_DEFAULT_BUAD    115200
-#define JVS_MAX_DATA        102
-//#define JVS_DEFAULT_ENCODING Mode_8N1
+#define JVS_MAX_DATA        254
+#define JVS_DEFAULT_ENCODING Mode_8N1
 
 #define JVS_BROADCAST_ADDR  0xFF
 #define JVS_MASTER_ADDR     0x00
+
+#define JVS_SYNC            0xE0
 
 // Broadcast commands
 #define JVS_RESET_CODE      0xF0
@@ -56,7 +86,7 @@
 #define JVS_STATUS_NORMAL           1
 #define JVS_STATUS_UNKNOWNCMD       2
 #define JVS_STATUS_CHECKSUMERROR    3
-#define JVS_STATUS_ACKERROR         4
+#define JVS_STATUS_OVERFLOW         4
 
 // Report codes
 #define JVS_REPORT_NORMAL           1
@@ -64,39 +94,82 @@
 #define JVS_REPORT_DATAERROR        3
 #define JVS_REPORT_BUSY             4
 
-// Debug mode:
+// Coin Condition codes
+#define JVS_COIN_NORMAL             0
+#define JVS_COIN_JAM                1
+#define JVS_COIN_NOCOUNTER          2
+#define JVS_COIN_BUSY               3
+
 #ifdef JVS_VERBOSE
-HardwareSerial _debugSerial = Serial
+#ifndef DBG_SERIAL
+#define DBG_SERIAL Serial
+#endif
 #endif
 
+#define DEC2BCD(dec) (((dec / 10) << 4) + (dec % 10))
 
 class JVS {
     public:
-    JVS(HardwareSerial &_ser, int _sense);
-    int begin(byte _rSize = 8, bool m = false, unsigned long _b = JVS_DEFAULT_BUAD);
+    JVS(HardwareSerial &_ser, int _sense, int _rts);
+    JVS(HardwareSerial &_ser, int _sense, int _rts, int _senseIn);
     void reset();
-    bool available();
+    void sendReset();               // Send reset request out. Only master can initiate this
+    void setInfo(JVS_Info &in) { _info = &in; }
+    void sendStatus(int s);
+    void sendReport(int s, int r);
+
+    int begin(bool m, unsigned long _b = JVS_DEFAULT_BUAD);
+    int available();
     int initMaster();
     int initDevice();
-    int sendFrame(uint8_t _id, JVS_Frame &_frame);
-    int readFrame(uint8_t _ackID, JVS_Frame &_frame);
+    int write(JVS_Frame &_frame);
+    int read(JVS_Frame &_frame);
     int update();
+    int runCommand();
+    int runCommand(JVS_Frame &_b);
+
+    // IO
+    byte machineSwitches = 0;       // Button storage for cab switches: 
+        // From MSB->LSB: 7: Test, 6: Tilt 1, 5: Tilt 2, 4: Tilt 3, 3-0: Unused
+    byte* playerArray = 0;          // Pointer to player array. This is read as:
+    /* byte playerSwitches[4][2] = {
+        // Player 1, note that this is single stick. Dual stick uses buttons 1-4 for UDLR
+        // Mahjong uses stick and buttons on byte 0 for A-F (Bits 5 - 0), byte 1 for G-N (Bits 7-0)
+        {           
+            0,      // MSBFIRST 7: Start, 6: Service, 5: Up, 4: Down, 3: Left, 2: Right, 1: Button 1, 0: Button 2
+            0       // MSBFIRST 7: Button 3, 6: Button 4, 5: Button 5, 4: Button 6, 3: Button 7, 2; Button 8, 0-1: Not used 
+        },       
+        {0,0},      // Player 2
+        {0,0},      // Player 3
+        {0,0}       // Player 4
+    } */
+    byte* coinSlots = 0;            // Pointer to coin slot array, read as:
+    /* byte coinSlots[2][2] = {
+        {           // Slot 1
+            0,      // MSBFIRST 7-6: Coin condition, 5-0: Coin counter MSB
+            0       // MSBFIRST 7-0: Coin counter LSB, total of 16383 coins(!!!)
+        },
+        { 0, 0 }
+    }
+
+    */                                                          
 
     private:
+
+    CircularBuffer<JVS_Frame,3> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
     HardwareSerial* _serial;        // Hardware serial port to use
     JVS_Info*   _info;              // Pointer to the information array
     JVS_Frame   _outgoingFrame;     // JVS frame to send out
-    JVSBuffer   _rxbuffer;            // JVS frame buffer
-    JVSBuffer   _txbuffer;          // TX buffer
 
-    bool _isMaster = false;         // Set to true if this is the master node
-    bool _jvsReady = false;         // Is set to true when ready to operate
-    byte _devicesAvailable = 0;     // How many JVS devices are in the chain
-    int _sensePin;                  // Sense pin is being used as an open collector output
-    uint8_t _nodeID;                // This node's ID
-    
+    bool isMaster = false;         // Set to true if this is the master node
+    bool jvsReady = false;         // Is set to true when ready to operate
+    uint8_t devicesAvailable = 0;     // How many JVS devices are in the chain
+    int sensePin;                  // Sense pin is connected to a 2N2222 transistor.
+    int senseInPin;                // Input sense pin for connecting to downstream IOs
+    int rtsPin;                    // Pin for MAX485 transmit enable
+    uint8_t nodeID;                // This node's ID
+
     void setSense(bool s);          // Set the sene pin's output. Only slave should do this, master is read-only
-    void sendReset();               // Send reset request out. Only master can initiate this
     int  setAddress();
     uint8_t setID(uint8_t id);          // Sets this node's ID, returns current ID
     uint8_t calculateSum(JVS_Frame &_f);
