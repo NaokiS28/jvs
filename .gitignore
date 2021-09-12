@@ -5,3 +5,4 @@
 .vscode/ipch
 .DS_Store
 JVS.code-workspace
+.gitignore
