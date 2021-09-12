@@ -2,7 +2,7 @@
 ### This is still WIP and may not work correctly!
 This is a WIP library for communicating over the JVS protocol in Arduino compatible boards. This library supports both Master mode and Node/Device mode. It requires one hardware UART to work connected to an RS485 transceiver such as the MAX RS485 TTL converter module.
 
-You will also need to connect the sense pin to pin 1 of USB-A connector. This should be pulled to ground with a 10kΩ resistor to GND on the input port. A master can only have 1 input port per instance, a device must have 1 ouput port but may optionally have an input port for daisy chaning IO devices. The data lines are connected between ports, the sense line must connect to an output for the output port and an input for the input port.
+You will also need to connect the sense pin to pin 1 of USB-A connector. This should be pulled to ground with a 1kΩ resistor to GND on the input port. A master can only have 1 input port per instance, a device must have 1 ouput port but may optionally have an input port for daisy chaning IO devices. The data lines are connected between ports, the sense line must connect to an output for the output port and an input for the input port.
 
 
 ## Usage
@@ -15,41 +15,34 @@ Once delcared, you will then need to run the initialization routines at startup 
 ```
 // Init as Device
 void setup(){
-    jvs.begin(8, false);    // Buffer size of 8 JVS frames, false = not master
-    //Serial2.print("Waiting for ID from master node...");
-    jvs.initDevice();       // Will hang here until initialized by the master node with and ID
-    //Serial2.println("OK!");
+    jvs.begin(DEVICE_NODE);    // Begin as device node
+    jvs.initDevice();
 }
 ```
 ```
 // Init as Master
 void setup(){
-    jvs.begin(8, true);    // Buffer size of 8 JVS frames, false = not master
-    //Serial2.println("Assigning device node IDs");
+    jvs.begin(MASTER_NODE);    // Begin as master node
     int found = jvs.initMaster();       // Will hang here until devices are assigned or there is no JVS nodes. Returns number of JVS nodes
     //Serial2.print("Found: ");
     //Serial2.print(found);
     //Serial2.println(" nodes");
 }
 ```
-Then you will need to put update() in your loop.
+Then you will need to put update() in your loop. You can have the JVS library run command codes:
 ```
 void loop(){
-    jvs.update();
+    if(jvs.update()){
+        jvs.runCommand();
+    }
 }
 ```
 Or you can read the data in manually:
 ```
 void loop(){
-    if(Serial.available()){
-        JVS_Frame inData[8];            // Buffer size of 8, adjust accordingly
-        byte ackID = JVS_MASTER_ADDR;   // Master node ID, should always be 0x00
-        byte count = 0;                 // Number of received messages
-        unsigned long endTimer = millis();
-        while(Serial.available() && (millis() - endTimer) >= 10){
-            jvs.readFrame(inData[count++]);    // Read in JVS frame.
-        }
-        jvs.sendAck(ackID);
+    if(jvs.update()){
+        JVS_Frame inFrame;      // Frame in
+        inFrame = jvs.read();   // Read frame into buffer
     }
 }
 ```
@@ -57,35 +50,34 @@ void loop(){
 The data for commands and arguments is stored in JVS_Frame.data:
 ```
 struct JVS_Frame {
-    uint8_t _sync = 0xE0;
-    uint8_t _nodeID;
-    uint8_t _numBytes;          // Includes all data bytes and sync
-    union {
-        uint32_t data32 [2]    ; // Caution: subject to endianness
-        uint16_t data16 [4]    ; // Caution: subject to endianness
-        uint8_t data8   [8]    ;
-        uint8_t data    [2]    ; // Most messages will use 2 bytes
-        uint8_t dataString [104] = {""} ;
+    uint8_t sync = 0xE0;            // Sync is always E0
+    uint8_t nodeID = 0;             // Node that frame is intended for, 0xFF is a boradcast frame
+    uint8_t numBytes = 0;           // Includes all subsequent bytes (Status, data and sum) in frame after this byte
+    uint8_t statusCode = 1;
+    union{
+        uint8_t data [254] = {0};   // Is command and parameters from master, report and results from device
+        uint16_t data16 [127];      // Some parameters are 16-bit ints
+        char dataString [102];      // When reading node IDs, they are stored as ASCII
     } ;
-    uint8_t _sum;               // Checksum of ID, numbytes, data bytes
+    uint8_t sum = 0;                // Checksum of ID, numbytes, data bytes
+    uint8_t cmdCount = 1;           // Number of commands counted. Only counts standard commands (not manufacturer specific)
 };
 ```
 ## JVS Info
 Both master and device nodes will need some data to report back when requested. The master needs the game name filled in where as devices need to report their name and what features it supports. If no data is supplied, it is prefilled with generic data. **Note: When set as device, _ident is used where as _mainID is used when set to master**.
 ```
 struct JVS_Info {
-    char _ident[102] = {"JVS I/O"};
-    char _mainID[102] = {"Generic JVS Game"};
-    uint8_t _cmdRev = 13;
-    uint8_t _jvsRev = 30;
-    uint8_t _comRev = 10;
-    uint8_t _numOfFeatures = 16;    // Most amount of features supported
-    
-    featureTypes _featureSupport[16] = {
-        _switchInput, _coinInput, _analogInput, _gpOutput
+    char ident[100] = {"JVS IO Library;github.com/NaokiS28/jvs;VER:0.1 Beta"};
+    char mainID[100] = {"Generic JVS Maker;Generic JVS Game;Ver A"};
+    uint8_t cmdRev = 11;            // Stored as BCD, some JVS hosts (Triforce) will report ver 0.0 if it's higher than 1.1
+    uint8_t jvsRev = 30;            // Stored as BCD, JVS rev. 20 and 30 are valid
+    uint8_t comRev = 10;            // Stored as BCD, use 10 unless you need to otherwise
+    uint8_t totalFeatures = 4;      // How many features supported, this isnt sent to the master but for the library
+    featureTypes featureSupport[16] = {
+        switchInput, coinInput, analogInput, gpOutput       // Supported features. These are listed in jvs_message.h
     };
-    uint8_t _featureParameters[16][3] = {
-        {2, 12, 0},     // Is _switchInput in generic construction
+    uint8_t featureParameters[16][3] = {                    // Parameters for the list of supported features.
+        {2, 12, 0},     // Is switchInput in generic construction
         {2, 0, 0},      // 2 Coin slots
         {6, 10, 0},     // 6 ADCs, 10-Bit resolution
         {8, 0, 0}       // 8 GPOs (general purpose output)
