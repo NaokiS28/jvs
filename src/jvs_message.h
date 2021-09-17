@@ -29,8 +29,8 @@ typedef enum {
 
 //
 struct JVS_Info {
-    char ident[100] = {"JVS IO Library;github.com/NaokiS28/jvs;VER:0.1 Beta"};
-    char mainID[100] = {"Generic JVS Game"};
+    char ident[100] = "JVS IO Library;github.com/NaokiS28/jvs;VER:0.1 Beta";
+    char mainID[100] = "Generic JVS Game";
     uint8_t cmdRev = 11;    // Some JVS hosts (Triforce) will report ver 0.0 if it's higher than 1.1
     uint8_t jvsRev = 30;
     uint8_t comRev = 10;

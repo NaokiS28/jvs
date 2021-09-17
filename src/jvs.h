@@ -24,10 +24,12 @@
 #include <CircularBuffer.h>
 
 // Debugging tools: Use with caution as they may break comms with some hosts
-//#define DBG_SERIAL Serial
+#define DBG_SERIAL Serial
 //#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
 //#define JVS_VERBOSE_LOG_FRAME     // Enables frame logging but will break comms with certain hosts
 //#define JVS_VERBOSE_LOG_CMG       // Same as above but for command packet decoder
+//#define JVS_VERBOSE_CMD
+
 
 #define BUFFER_FULL         1
 #define BUFFER_ADD_ERROR    2
@@ -108,6 +110,21 @@
 
 #define DEC2BCD(dec) (((dec / 10) << 4) + (dec % 10))
 
+struct JVS_Controls {
+    byte cabinet = 0;
+
+    byte player1[2] = {0, 0};
+    byte player2[2] = {0, 0};
+    byte player3[2] = {0, 0};
+    byte player4[2] = {0, 0};
+
+    byte coin1[2] = {0,0};
+    byte coin2[2] = {0,0};
+    byte coin3[2] = {0,0};
+    byte coin4[2] = {0,0};
+};
+
+
 class JVS {
     public:
     JVS(HardwareSerial &_ser, int _sense, int _rts);
@@ -118,6 +135,13 @@ class JVS {
     void sendStatus(int s);
     void sendReport(int s, int r);
 
+    void writePanelSw(byte d) { machineSwitches = d; }
+    void setPlayerArray(byte *arr) { playerArray = arr; }
+    void setAnalogArray(int *arr) { analogArray = arr; }
+    void setCoinArray(uint16_t *arr) { coinSlots = arr; }
+    void setCoinMechArray(byte *arr) { coinCondition = arr; }
+    void setOutputarray(byte *arr) { outputSlots = arr; }
+
     int begin(bool m, unsigned long _b = JVS_DEFAULT_BUAD);
     int available();
     int initMaster();
@@ -127,6 +151,13 @@ class JVS {
     int update();
     int runCommand();
     int runCommand(JVS_Frame &_b);
+
+    private:
+
+    CircularBuffer<JVS_Frame,3> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
+    HardwareSerial* _serial;        // Hardware serial port to use
+    JVS_Info*   _info;              // Pointer to the information array
+    JVS_Frame   _outgoingFrame;     // JVS frame to send out
 
     // IO
     byte machineSwitches = 0;       // Button storage for cab switches: 
@@ -143,23 +174,11 @@ class JVS {
         {0,0},      // Player 3
         {0,0}       // Player 4
     } */
-    byte* coinSlots = NULL;            // Pointer to coin slot array, read as:
-    /* byte coinSlots[2][2] = {
-        {           // Slot 1
-            0,      // MSBFIRST 7-6: Coin condition, 5-0: Coin counter MSB
-            0       // MSBFIRST 7-0: Coin counter LSB, total of 16383 coins(!!!)
-        },
-        { 0, 0 }
-    }
+    uint16_t* coinSlots = NULL;     // Pointer to coin slot counter, read as: literal uint counter [per player]
+    byte* coinCondition = NULL;     // Coin conditions [per player]
+    byte* outputSlots = NULL;
+    int* analogArray = NULL;
 
-    */                                                          
-
-    private:
-
-    CircularBuffer<JVS_Frame,3> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
-    HardwareSerial* _serial;        // Hardware serial port to use
-    JVS_Info*   _info;              // Pointer to the information array
-    JVS_Frame   _outgoingFrame;     // JVS frame to send out
 
     bool isMaster = false;         // Set to true if this is the master node
     bool jvsReady = false;         // Is set to true when ready to operate
@@ -167,6 +186,7 @@ class JVS {
     int sensePin;                  // Sense pin is connected to a 2N2222 transistor.
     int senseInPin;                // Input sense pin for connecting to downstream IOs
     int rtsPin;                    // Pin for MAX485 transmit enable
+    uint8_t featureLoc[16];        // Where the parameters for each feature is stored.
     uint8_t nodeID;                // This node's ID
 
     void setSense(bool s);          // Set the sene pin's output. Only slave should do this, master is read-only
@@ -175,6 +195,4 @@ class JVS {
     uint8_t calculateSum(JVS_Frame &_f);
     int readFrame();
 };
-
-
 #endif

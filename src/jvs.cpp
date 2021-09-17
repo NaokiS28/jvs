@@ -219,6 +219,12 @@ int JVS::initDevice(){
     DBG_SERIAL.println(F("JVS: INIT DEVICE"));
     #endif
     isMaster = false;
+
+    // Run through feature support and find out the order given
+    // This allows runCommand to know where the parameters are kept
+    for(int i = 0; i < _info->totalFeatures; i++){
+        featureLoc[_info->featureSupport[i]] = i;
+    }
     return 0;
 }
 
@@ -257,7 +263,7 @@ int JVS::write(JVS_Frame &_frame){
             sumByte = 4;    // Naughty hack
         }
     } 
-    if(!errorCode){
+    if(!errorCode || errorCode == 2){
         for(int f = 0; f < b; f++){
             d = _frame.data[f];
             // As JVS_SYNC is used to signal SOF, this check is to see if D0 needs to be injected to signify
@@ -457,10 +463,10 @@ uint8_t JVS::setID(uint8_t id){
 }
 
 int JVS::update(){
-    static uint32_t lastReceived;
+    // static uint32_t lastReceived;
 
     if(_serial->available()){
-        if(!readFrame()) lastReceived = millis();
+        readFrame(); // lastReceived = millis();
     } 
     return available();
 }
@@ -478,7 +484,10 @@ int JVS::runCommand(JVS_Frame &received){
     // Read the command byte
     uint8_t dataCount = 0;
     int errorCode = 0;
-    int temp = 0;       // Generic temp byte
+    int index = 0;      // Temp int
+    int temp = 0;       // Generic temp int
+    int tempB = 0;      // Generic temp int
+    int tempC = 0;
     bool n = false;
     bool responseNeeded = true;
         JVS_Frame response;
@@ -497,10 +506,10 @@ int JVS::runCommand(JVS_Frame &received){
             }
 
             #ifdef JVS_VERBOSE_CMD
-            DBG_SERIAL.print(F("C: "));
-            DBG_SERIAL.println(c);
-            DBG_SERIAL.print(F("CM: "));
-            DBG_SERIAL.println(received.numBytes-1);
+            //DBG_SERIAL.print(F("C: "));
+            //DBG_SERIAL.println(c);
+            //DBG_SERIAL.print(F("CM: "));
+            //DBG_SERIAL.println(received.numBytes-1);
             DBG_SERIAL.print(F("COMMAND: "));
             DBG_SERIAL.println(received.data[c], HEX);
             #endif
@@ -544,18 +553,6 @@ int JVS::runCommand(JVS_Frame &received){
                     write(_outgoingFrame);
                     responseNeeded = false;
                     break;
-                // Default case is to send an unknown command response.
-                // Any commands executed before this will still send
-                default:
-                case 0x02:
-                    // Unknown
-                    responseNeeded = true;
-                    response.numBytes = 0;  // Data bytes
-                    response.statusCode = JVS_STATUS_UNKNOWNCMD;
-                    c+= received.numBytes-1;
-                    errorCode = 12;
-                    break;
-
                 case 0x10:
                     // IO ident
                     responseNeeded = true;
@@ -648,29 +645,111 @@ int JVS::runCommand(JVS_Frame &received){
                     #endif
                     c+= received.numBytes-1;
                     break;
+
                 case 0x20:
                     // Read switch inputs
                     responseNeeded = true;
+                    c++;
                     // If master requests 2 players and IO supports 2, p = 0. 
                     // Master should not normally request more than what IO supports
-                    if(received.data[c++] - _info->featureParameters[0][0] < 0){
+                    if(_info->featureParameters[featureLoc[coinInput]][0] - received.data[c] < 0){
                         // If master request more players than supported, send error
                         response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
                     } else {
-                        temp = received.data[c++] - _info->featureParameters[0][0];
-                        response.data[dataCount++] = JVS_REPORT_NORMAL;
-                        response.data[dataCount++] = machineSwitches; // Test SW, TILT
-                        for(int p = temp; p < _info->featureParameters[0][0]; p++){
+                        temp = received.data[c++];  // How many players to read
+                        tempB = _info->featureParameters[featureLoc[switchInput]][0];   // How many players
+                        if(tempB >= temp) {
+                            // Set player count to tempB
+                            tempB = temp;
+                        }
+                        temp = received.data[c];  // How many bytes per player
+                        tempC = _info->featureParameters[featureLoc[switchInput]][1];   // How many switches per player
+                        
+                        response.data[dataCount++] = JVS_REPORT_NORMAL; // Byte 0 report
+                        response.data[dataCount++] = machineSwitches;   // Byte 1 Test SW, TILT
+
+                        for(int p = 0; p < tempB; p++){
                             // Player number
-                            if(playerArray != NULL){
-                                response.data[dataCount++] = (*(playerArray+p)+0);
-                                response.data[dataCount++] = (*(playerArray+p)+1);
+                            for(int b = 0; b < temp; b++){
+                                // Byte number
+                                if(playerArray != nullptr || ((b * 8) <= tempC)){
+                                    response.data[dataCount++] = *(playerArray + p + b);
+                                } else {
+                                    response.data[dataCount++] = 0;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                case 0x21:
+                    // Read coin inputs
+                    responseNeeded = true;
+                    c++;    // Get next parameter byte
+                    // If master requests 2 players and IO supports 2, p = 0. 
+                    // Master should not normally request more than what IO supports
+                    if(_info->featureParameters[featureLoc[switchInput]][0] - received.data[c] < 0){
+                        // If master request more players than supported, send error
+                        response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
+                    } else {
+                        temp = received.data[c];  // How many players to read
+
+                        response.data[dataCount++] = JVS_REPORT_NORMAL; // Byte 0 report
+
+                        for(int p = 0; p < temp; p++){
+                            // Coin slot number
+                            if(playerArray != nullptr){
+                                response.data[dataCount++] = highByte(*(coinSlots + p));
+                                response.data[dataCount++] = lowByte(*(coinSlots + p));
                             } else {
                                 response.data[dataCount++] = 0;
                                 response.data[dataCount++] = 0;
                             }
                         }
                     }
+                    break;
+                case 0x30:
+                    // Decrease coin counter
+                    responseNeeded = true;
+
+                        index = received.data[c++];
+                        temp = (received.data[c++] << 8);
+                        temp &= (received.data[c]);
+                        *(coinSlots + index) -= temp;
+                        response.data[dataCount++] = JVS_REPORT_NORMAL;
+                    break;
+                case 0x35:
+                    // Increase coin counter
+                    responseNeeded = true;
+
+                        index = received.data[c++];
+                        temp = (received.data[c++] << 8);
+                        temp &= received.data[c];
+                        *(coinSlots + index) -= temp;
+                        response.data[dataCount++] = JVS_REPORT_NORMAL;
+                    break;
+                case 0x32:
+                    // GPO 1
+                    responseNeeded = true;
+                    temp = received.data[c++];
+                    if((_info->featureParameters[featureLoc[gpOutput]][0] - temp) < 0){
+                        // If master request more bytes than supported, send error
+                        response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
+                    } else {
+                        for(int o = 0; o < temp; o++){
+                            outputSlots[o] = received.data[c++];
+                        }
+                    }
+                    break;
+                // Default case is to send an unknown command response.
+                // Any commands executed before this will still send
+                default:
+                case 0x02:
+                    // Unknown
+                    responseNeeded = true;
+                    response.numBytes = 0;  // Data bytes
+                    response.statusCode = JVS_STATUS_UNKNOWNCMD;
+                    c+= received.numBytes-1;
+                    errorCode = 12;
                     break;
             }
         }
