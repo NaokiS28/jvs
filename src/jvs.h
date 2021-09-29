@@ -26,6 +26,7 @@
 // Debugging tools: Use with caution as they may break comms with some hosts
 #define DBG_SERIAL Serial
 //#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
+#define JVS_ERROR
 //#define JVS_VERBOSE_LOG_FRAME     // Enables frame logging but will break comms with certain hosts
 //#define JVS_VERBOSE_LOG_CMG       // Same as above but for command packet decoder
 //#define JVS_VERBOSE_CMD
@@ -34,6 +35,10 @@
 #define BUFFER_FULL         1
 #define BUFFER_ADD_ERROR    2
 #define BUFFER_READ_ERROR   3
+
+#ifndef JVS_BUFFER_SIZE
+#define JVS_BUFFER_SIZE 2
+#endif
 
 #define JVS_SENSE_INACTIVE  0
 #define JVS_SENSE_ACTIVE    1
@@ -78,17 +83,17 @@
 #define JVS_ANALOGOUT_CODE      0x33
 #define JVS_CHARACTEROUT_CODE   0x34
 #define JVS_COININCREASE_CODE   0x35
-#define JVS_PAYOUTDECREAsE_CODE 0x36
-#define JVS_GENERICOUT2_CODE    0x37
-#define JVS_GENERICOUT3_CODE    0x38
+#define JVS_PAYOUTDECREASE_CODE 0x36
+#define JVS_GENERICOUT2_CODE    0x37        // Sega Type 1 IO does not support this command
+#define JVS_GENERICOUT3_CODE    0x38        // Sega Type 1 IO does not support this command
 
 // Commands 0x60 to 0x7F are manufacturer specific and not covered here
 
 // Status code
 #define JVS_STATUS_NORMAL           1
-#define JVS_STATUS_UNKNOWNCMD       2
+#define JVS_STATUS_UNKNOWNCMD       2       // Sega IO sends this if there is a parameter error
 #define JVS_STATUS_CHECKSUMERROR    3
-#define JVS_STATUS_OVERFLOW         4
+#define JVS_STATUS_OVERFLOW         4       // Sega IO sends this back when it receives a empty packet
 
 // Report codes
 #define JVS_REPORT_NORMAL           1
@@ -102,13 +107,13 @@
 #define JVS_COIN_NOCOUNTER          2
 #define JVS_COIN_BUSY               3
 
-#ifdef JVS_VERBOSE
-#ifndef DBG_SERIAL
-#define DBG_SERIAL Serial
-#endif
-#endif
+// Library errors
+#define JVS_NOTREADY                -1
+
 
 #define DEC2BCD(dec) (((dec / 10) << 4) + (dec % 10))
+#define BCD2DEC(bcd) (((bcd >> 4) * 10) + (bcd & 0xf))
+
 
 struct JVS_Controls {
     byte cabinet = 0;
@@ -129,6 +134,9 @@ class JVS {
     public:
     JVS(HardwareSerial &_ser, int _sense, int _rts);
     JVS(HardwareSerial &_ser, int _sense, int _rts, int _senseIn);
+
+    uint8_t nodeID;                // This node's ID
+
     void reset();
     void sendReset();               // Send reset request out. Only master can initiate this
     void setInfo(JVS_Info &in) { _info = &in; }
@@ -140,7 +148,7 @@ class JVS {
     void setAnalogArray(int *arr) { analogArray = arr; }
     void setCoinArray(uint16_t *arr) { coinSlots = arr; }
     void setCoinMechArray(byte *arr) { coinCondition = arr; }
-    void setOutputarray(byte *arr) { outputSlots = arr; }
+    void setOutputArray(byte *arr) { outputSlots = arr; }
 
     int begin(bool m, unsigned long _b = JVS_DEFAULT_BUAD);
     int available();
@@ -152,12 +160,48 @@ class JVS {
     int runCommand();
     int runCommand(JVS_Frame &_b);
 
+    uint8_t findFeatureParam(featureTypes t, uint8_t p) {
+        // Returns parameter for given feature. IE asking for parameter 0 for gpOutputs will return number of outputs
+        if(p > 2) p = 2;
+        _info->featureParameters[featureLoc[t]][p]; 
+    }
+
+    // Master mode commands
+    // These only work in master mode. They will fail silently if in device mode
+    void ioIdentify(uint8_t id);                                // Request IO Board name
+    void requestVersions(uint8_t id);                           // Request concatenated versions
+    void writeMainID(uint8_t id);                               // Send host name
+    void readSwitches(uint8_t id, uint8_t p, uint8_t d);        // Request switch inputs
+    void readCoins(uint8_t id, uint8_t c);                      // Request coin slot status
+    void readAnalog(uint8_t id, uint8_t c);                     // Request analog inputs
+    void writeAnalog(uint8_t id, uint8_t c, uint16_t d);        // Write analog output data (singular)
+    void writeAnalog(uint8_t id, uint8_t c, uint16_t* d);       // Write analog output data (array)
+    void writeCharacter(uint8_t id, uint8_t d);                 // Write character display output (singular)
+    void writeCharacter(uint8_t id, uint8_t c, uint8_t* d);     // Write character display output (array)
+    void readRotary(uint8_t id, uint8_t c);                     // Request rotary input data
+    void readKeypad(uint8_t id);                                // Request keypad/keyboard code
+    void readSceenPos(uint8_t id, uint8_t c);                   // Request screen pos
+    void readMiscSwitch(uint8_t id, uint8_t b);                 // Request misc. input data
+    void readPayout(uint8_t id, uint8_t c);                     // Request remaining payouts
+    void requestRetransmit(uint8_t id);                         // Command a retransmit of last package
+    void increaseCoin(uint8_t id, uint8_t s, uint16_t c);       // Increment a coin counter
+    void decreaseCoin(uint8_t id, uint8_t s, uint16_t c);       // Decrement a coin counter
+    void increasePayout(uint8_t id, uint8_t s, uint16_t c);     // Increment a hopper payout
+    void decreasePayout(uint8_t id, uint8_t s, uint16_t c);     // Decrement a hopper payout
+
+    // GPOs
+    void writeOutputs(uint8_t id);                                  // Write outputSlots array
+    void writeOutputs(uint8_t id, uint8_t data);                    // Write to first 8 output channels
+    void writeOutputs(uint8_t id, uint16_t num, uint8_t* data);     // Write to outputs using GPO1 command
+    void writeOutputByte(uint8_t id, uint16_t idx, uint8_t data);   // Write to outputs using GPO2 command
+    void writeOutputBit(uint8_t id, uint16_t idx, uint8_t data);    // Write to outputs using GPO3 command
+
     private:
 
-    CircularBuffer<JVS_Frame,3> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
+    CircularBuffer<JVS_Frame,JVS_BUFFER_SIZE> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
     HardwareSerial* _serial;        // Hardware serial port to use
     JVS_Info*   _info;              // Pointer to the information array
-    JVS_Frame   _outgoingFrame;     // JVS frame to send out
+    //JVS_Frame   _outgoingFrame;     // JVS frame to send out
 
     // IO
     byte machineSwitches = 0;       // Button storage for cab switches: 
@@ -187,12 +231,20 @@ class JVS {
     int senseInPin;                // Input sense pin for connecting to downstream IOs
     int rtsPin;                    // Pin for MAX485 transmit enable
     uint8_t featureLoc[16];        // Where the parameters for each feature is stored.
-    uint8_t nodeID;                // This node's ID
 
     void setSense(bool s);          // Set the sene pin's output. Only slave should do this, master is read-only
     int  setAddress();
     uint8_t setID(uint8_t id);          // Sets this node's ID, returns current ID
-    uint8_t calculateSum(JVS_Frame &_f);
+    uint8_t calculateSum(JVS_Frame &_f, bool send = false);
     int readFrame();
+
+    unsigned char reverse(unsigned char b) {
+        b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
+        b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
+        b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
+        return b;
+    }
+
+    uint32_t lastSent;
 };
 #endif

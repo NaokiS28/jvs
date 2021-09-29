@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 
+#ifdef JVS_FULL_FRAME
 struct JVS_Frame {
     uint8_t sync = 0xE0;
     uint8_t nodeID = 0;
@@ -11,11 +12,27 @@ struct JVS_Frame {
     union{
         uint8_t data [254] = {0};
         uint16_t data16 [127];
-        char dataString [102];
+        char dataString [104];
     } ;
     uint8_t sum = 0;                // Checksum of ID, numbytes, data bytes
     uint8_t cmdCount = 1;           // Number of commands counted. Only counts standard frames
 };
+#else
+// Half size frames
+struct JVS_Frame {
+    uint8_t sync = 0xE0;
+    uint8_t nodeID = 0;
+    uint8_t numBytes = 0;          // Includes all data bytes and sync
+    uint8_t statusCode = 1;
+    union{
+        uint8_t data [104] = {0};
+        uint16_t data16 [52];
+        char dataString [104];
+    } ;
+    uint8_t sum = 0;                // Checksum of ID, numbytes, data bytes
+    uint8_t cmdCount = 1;           // Number of commands counted. Only counts standard frames
+};
+#endif
 
 typedef enum {
     endCode, switchInput, coinInput, analogInput, rotaryInput, keycodeInput,
