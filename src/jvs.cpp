@@ -320,7 +320,7 @@ int JVS::write(JVS_Frame &_frame){
     DBG_SERIAL.print(F("ID: "));
     DBG_SERIAL.println(_frame.nodeID, HEX);
     DBG_SERIAL.print(F("# of bytes: "));
-    DBG_SERIAL.println(_frame.numBytes);
+    DBG_SERIAL.println(_frame.numBytes +1);
     if(!isMaster){
         DBG_SERIAL.print(F("Status: "));
         DBG_SERIAL.println(_frame.statusCode);
@@ -339,7 +339,8 @@ int JVS::write(JVS_Frame &_frame){
 }
 
 int JVS::read(JVS_Frame &_frame){
-    _frame = rxbuffer.shift();
+    _frame = rxbuffer; //.shift();
+    rxFlag = false;
     return 0;
 }
 
@@ -349,17 +350,18 @@ int JVS::readFrame(){
     byte _errorCode = 1;        // 1 = Bad SOF, 2 = Too big, 3 = Bad sum
     byte _sum = 0;
     byte bytesToRead = 0;
+
     // Start of Frame
     if(_d == 0xE0) {
         _frame.sync = _d;
         _errorCode = 0;
     }
-
+    /*
     if(_errorCode != 0){
         // Bad SOF
-        #ifdef JVS_VERBOSE
-        DBG_SERIAL.print(F("JVS: Bad SOF: "));
-        DBG_SERIAL.println(_frame.sync);
+        #ifdef JVS_ERROR
+        DBG_SERIAL.print(F("JVS: Bad SOF: 0x"));
+        DBG_SERIAL.println(_frame.sync, HEX);
         #endif
         while(_serial->available()) {
             uint8_t in = _serial->read();
@@ -370,6 +372,7 @@ int JVS::readFrame(){
             }
         }
     }
+    */
     while(!_serial->available());
     if(_errorCode == 0) {
         // Start of frame good
@@ -409,7 +412,7 @@ int JVS::readFrame(){
                 for(int i = 0; i < bytesToRead-1; i++){
                     while(!_serial->available());
                     byte b = _serial->read();
-                    if(b == 0xD0) {
+                    if(b == 0xD0 && (bytesToRead-1 > 0)) {
                         // Mark received
                         // This means this byte equals a SOF byte and so needs to be translated
                         _frame.data[i] = _serial->read() + 1;
@@ -421,26 +424,34 @@ int JVS::readFrame(){
             // Sum byte
             while(!_serial->available());
             _frame.sum = _serial->read();
+
+            // Dumping the FCA2 PCB showed that you need to escape the sum byte too
+            if(_frame.sum == 0xD0) {
+                while(!_serial->available());
+                _frame.sum = _serial->read() + 1;
+            }
+
             // Data read, check sum
             _sum = calculateSum(_frame);
 
             if(_frame.sum != _sum){
                 #ifdef JVS_ERROR
-                DBG_SERIAL.print(F("JVS: Received bad sum, expected: "));
-                DBG_SERIAL.print(_sum);
-                DBG_SERIAL.print(F(" got: "));
-                DBG_SERIAL.println(_frame.sum);
+                DBG_SERIAL.print(F("JVS: Received bad sum, expected: 0x"));
+                DBG_SERIAL.print(_sum, HEX);
+                DBG_SERIAL.print(F(" got: 0x"));
+                DBG_SERIAL.println(_frame.sum, HEX);
                 #endif
                 _errorCode = 3;
                 sendStatus(JVS_STATUS_CHECKSUMERROR);
             }
         }
     }
-    if(_errorCode == 0 && rxbuffer.available()){
+    if(_errorCode == 0){ //&& rxbuffer.available()){
         #ifdef JVS_VERBOSE
         DBG_SERIAL.println(F("JVS Recieved: To buffer"));
         #endif
-        rxbuffer.push(_frame);
+        rxFlag = true;
+        rxbuffer = _frame; //.push(_frame);
     }
     
     // Log this after as JVS is an impatient protocol
@@ -452,7 +463,7 @@ int JVS::readFrame(){
     DBG_SERIAL.print(F("JVS: # of Bytes: "));
     DBG_SERIAL.println(_frame.numBytes, HEX);
     DBG_SERIAL.println(F("JVS: Data bytes:"));
-    for(int db = 0; db < _frame.numBytes-1; db++){
+    for(int db = 0; db < _frame.numBytes-2; db++){
         DBG_SERIAL.println(_frame.data[db], HEX);
     }
     DBG_SERIAL.print(F("JVS: Received Sum:"));
@@ -503,12 +514,15 @@ int JVS::update(){
 }
 
 int JVS::runCommand(){
+    rxFlag = false;
+    return runCommand(rxbuffer);
+    /*
     if(rxbuffer.size()){
         JVS_Frame _b = rxbuffer.shift();
         return runCommand(_b);
     } else {
         return 1;
-    }
+    }*/
 }
 
 int JVS::runCommand(JVS_Frame &received){
@@ -798,7 +812,7 @@ int JVS::runCommand(JVS_Frame &received){
 }
 
 int JVS::available (void) {
-  return rxbuffer.size();
+  return rxFlag;
 }
 
 // Sets the JVS sense line. Send HIGH to set sense to 5V

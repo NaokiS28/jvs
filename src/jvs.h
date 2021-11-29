@@ -25,7 +25,7 @@
 
 // Debugging tools: Use with caution as they may break comms with some hosts
 #define DBG_SERIAL Serial
-//#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
+#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
 #define JVS_ERROR
 //#define JVS_VERBOSE_LOG_FRAME     // Enables frame logging but will break comms with certain hosts
 //#define JVS_VERBOSE_LOG_CMG       // Same as above but for command packet decoder
@@ -37,7 +37,7 @@
 #define BUFFER_READ_ERROR   3
 
 #ifndef JVS_BUFFER_SIZE
-#define JVS_BUFFER_SIZE 2
+#define JVS_BUFFER_SIZE 1
 #endif
 
 #define JVS_SENSE_INACTIVE  0
@@ -110,6 +110,27 @@
 // Library errors
 #define JVS_NOTREADY                -1
 
+// JVS Feature list (for use with jvs_message):
+#define JVS_FEATURE_END 0
+#define JVS_FEATURE_SWITCH 1
+#define JVS_FEATURE_COIN 2
+#define JVS_FEATURE_ANALOG 3
+#define JVS_FEATURE_ROTARY 4
+#define JVS_FEATURE_KEYCODE 5
+#define JVS_FEATURE_SCREEN 6
+#define JVS_FEATURE_MISC 7
+#define JVS_FEATURE_CARD 16
+#define JVS_FEATURE_MEDAL 17
+#define JVS_FEATURE_GPO 18
+#define JVS_FEATURE_ANALOG_OUT 19
+#define JVS_FEATURE_CHARACTER 20
+#define JVS_FEATURE_BACKUP 21
+
+// JVS character output types (for use with jvs_message):
+#define JVS_CHARACTER_ASCII 1
+#define JVS_CHARACTER_ALPHA 2
+#define JVS_CHARACTER_KATA 3
+#define JVS_CHARACTER_KANJI 4
 
 #define DEC2BCD(dec) (((dec / 10) << 4) + (dec % 10))
 #define BCD2DEC(bcd) (((bcd >> 4) * 10) + (bcd & 0xf))
@@ -198,7 +219,9 @@ class JVS {
 
     private:
 
-    CircularBuffer<JVS_Frame,JVS_BUFFER_SIZE> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
+    //CircularBuffer<JVS_Frame,JVS_BUFFER_SIZE> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
+    bool rxFlag = false;
+    JVS_Frame rxbuffer;
     HardwareSerial* _serial;        // Hardware serial port to use
     JVS_Info*   _info;              // Pointer to the information array
     //JVS_Frame   _outgoingFrame;     // JVS frame to send out
