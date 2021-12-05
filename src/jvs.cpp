@@ -296,14 +296,19 @@ int JVS::write(JVS_Frame &_frame){
             d = _frame.data[f];
             // As JVS_SYNC is used to signal SOF, this check is to see if D0 needs to be injected to signify
             //  that the byte is not a SOF.
-            if(d == JVS_SYNC) {
-                _serial->write(0xD0);
-                d--;
-                //_serial->flush();
+            if(d == JVS_SYNC || d == JVS_MARK) {
+                _serial->write(JVS_MARK);
+                _serial->write(d-1);
+            } else {
+                _serial->write(d);
             }
-            _serial->write(d);
             _serial->flush();
         }
+    }
+
+    if(sumByte == JVS_SYNC || sumByte == JVS_MARK){
+        _serial->write(0xD0);
+        sumByte--;
     }
     _serial->write(sumByte);
     _serial->flush();
@@ -350,7 +355,6 @@ int JVS::readFrame(){
     byte _errorCode = 1;        // 1 = Bad SOF, 2 = Too big, 3 = Bad sum
     byte _sum = 0;
     byte bytesToRead = 0;
-
     // Start of Frame
     if(_d == 0xE0) {
         _frame.sync = _d;
@@ -373,8 +377,8 @@ int JVS::readFrame(){
         }
     }
     */
-    while(!_serial->available());
     if(_errorCode == 0) {
+        while(!_serial->available());
         // Start of frame good
         _frame.nodeID = _serial->read();       // ID of the packet
         while(!_serial->available());
@@ -412,10 +416,12 @@ int JVS::readFrame(){
                 for(int i = 0; i < bytesToRead-1; i++){
                     while(!_serial->available());
                     byte b = _serial->read();
-                    if(b == 0xD0 && (bytesToRead-1 > 0)) {
+                    if(b == JVS_MARK && (bytesToRead-1 > 0)) {
+                        while(!_serial->available());
+                        byte in = _serial->read();
                         // Mark received
-                        // This means this byte equals a SOF byte and so needs to be translated
-                        _frame.data[i] = _serial->read() + 1;
+                        // This means this byte either equals a SOF byte or Mark byte and so needs to be translated
+                        _frame.data[i] = in+1;
                     } else {
                         _frame.data[i] = b;
                     }
@@ -440,6 +446,16 @@ int JVS::readFrame(){
                 DBG_SERIAL.print(_sum, HEX);
                 DBG_SERIAL.print(F(" got: 0x"));
                 DBG_SERIAL.println(_frame.sum, HEX);
+                DBG_SERIAL.print("Node: ");
+                DBG_SERIAL.print(_frame.nodeID);
+                DBG_SERIAL.print(" Number of bytes: ");
+                DBG_SERIAL.println(_frame.numBytes);
+                DBG_SERIAL.print("Data Bytes: ");
+                for(int i=1; i < _frame.numBytes; i++){
+                    DBG_SERIAL.print(_frame.data[i], HEX);
+                    DBG_SERIAL.print(", ");
+                }
+                DBG_SERIAL.println();
                 #endif
                 _errorCode = 3;
                 sendStatus(JVS_STATUS_CHECKSUMERROR);
@@ -506,11 +522,13 @@ uint8_t JVS::setID(uint8_t id){
 
 int JVS::update(){
     // static uint32_t lastReceived;
-
+    byte code = 0;
     if(_serial->available()){
-        readFrame(); // lastReceived = millis();
+        byte result = readFrame(); // lastReceived = millis();
+        if(result != 0) code = result;
+        else code = available();
     } 
-    return available();
+    return code;
 }
 
 int JVS::runCommand(){

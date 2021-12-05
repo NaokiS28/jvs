@@ -25,7 +25,7 @@
 
 // Debugging tools: Use with caution as they may break comms with some hosts
 #define DBG_SERIAL Serial
-#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
+//#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
 #define JVS_ERROR
 //#define JVS_VERBOSE_LOG_FRAME     // Enables frame logging but will break comms with certain hosts
 //#define JVS_VERBOSE_LOG_CMG       // Same as above but for command packet decoder
@@ -54,6 +54,7 @@
 #define JVS_MASTER_ADDR     0x00
 
 #define JVS_SYNC            0xE0
+#define JVS_MARK            0xD0
 
 // Broadcast commands
 #define JVS_RESET_CODE      0xF0
