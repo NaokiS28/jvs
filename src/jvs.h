@@ -4,11 +4,11 @@
 
     Sense out is timing specific. It must be set low like so:
         If the IO board is the last in the chain:
-            Master -> Reset
-            Master -> Reset (within 20 ms)
-            Master -> SOF 
+            Host -> Reset
+            Host -> Reset (within 20 ms)
+            Host -> SOF 
             Device -> Set sense low
-            Master -> Rest of ID packet.
+            Host -> Rest of ID packet.
         
         If the IO board is NOT the last in the chain:
             Set sense low after receiving SOF and sense input is low.
@@ -20,8 +20,8 @@
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include <jvs_message.h>
-#include <jvs_commands.h>
-#include <CircularBuffer.h>
+//#include <jvs_commands.h>
+
 
 // Debugging tools: Use with caution as they may break comms with some hosts
 #define DBG_SERIAL Serial
@@ -43,7 +43,7 @@
 #define JVS_SENSE_INACTIVE  0
 #define JVS_SENSE_ACTIVE    1
 
-#define MASTER_NODE         1
+#define HOST_NODE           1
 #define DEVICE_NODE         0
 
 #define JVS_DEFAULT_BUAD    115200
@@ -51,7 +51,7 @@
 #define JVS_DEFAULT_ENCODING Mode_8N1
 
 #define JVS_BROADCAST_ADDR  0xFF
-#define JVS_MASTER_ADDR     0x00
+#define JVS_HOST_ADDR     0x00
 
 #define JVS_SYNC            0xE0
 #define JVS_MARK            0xD0
@@ -160,7 +160,7 @@ class JVS {
     uint8_t nodeID;                // This node's ID
 
     void reset();
-    void sendReset();               // Send reset request out. Only master can initiate this
+    void sendReset();               // Send reset request out. Only host can initiate this
     void setInfo(JVS_Info &in) { _info = &in; }
     void sendStatus(int s);
     void sendReport(int s, int r);
@@ -174,7 +174,7 @@ class JVS {
 
     int begin(bool m, unsigned long _b = JVS_DEFAULT_BUAD);
     int available();
-    int initMaster();
+    int initHost();
     int initDevice();
     int write(JVS_Frame &_frame);
     int read(JVS_Frame &_frame);
@@ -188,8 +188,8 @@ class JVS {
         _info->featureParameters[featureLoc[t]][p]; 
     }
 
-    // Master mode commands
-    // These only work in master mode. They will fail silently if in device mode
+    // Host mode commands
+    // These only work in host mode. They will fail silently if in device mode
     void ioIdentify(uint8_t id);                                // Request IO Board name
     void requestVersions(uint8_t id);                           // Request concatenated versions
     void writeMainID(uint8_t id);                               // Send host name
@@ -248,7 +248,7 @@ class JVS {
     int* analogArray = NULL;
 
 
-    bool isMaster = false;         // Set to true if this is the master node
+    bool isHost = false;         // Set to true if this is the host node
     bool jvsReady = false;         // Is set to true when ready to operate
     uint8_t devicesAvailable = 0;     // How many JVS devices are in the chain
     int sensePin;                  // Sense pin is connected to a 2N2222 transistor.
@@ -256,7 +256,7 @@ class JVS {
     int rtsPin;                    // Pin for MAX485 transmit enable
     uint8_t featureLoc[16];        // Where the parameters for each feature is stored.
 
-    void setSense(bool s);          // Set the sene pin's output. Only slave should do this, master is read-only
+    void setSense(bool s);          // Set the sene pin's output. Only slave should do this, host is read-only
     int  setAddress();
     uint8_t setID(uint8_t id);          // Sets this node's ID, returns current ID
     uint8_t calculateSum(JVS_Frame &_f, bool send = false);

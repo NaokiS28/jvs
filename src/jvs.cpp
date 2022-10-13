@@ -23,13 +23,13 @@ int JVS::begin(bool m, unsigned long _b){
     pinMode(rtsPin, OUTPUT);
     digitalWrite(rtsPin, LOW);
 
-    if(m == MASTER_NODE){
+    if(m == HOST_NODE){
         #ifdef JVS_VERBOSE
-        DBG_SERIAL.println(F("JVS: MASTER MODE"));
+        DBG_SERIAL.println(F("JVS: HOST MODE"));
         #endif
-        // This is the master node
-        nodeID = JVS_MASTER_ADDR;
-        isMaster = true;
+        // This is the host node
+        nodeID = JVS_HOST_ADDR;
+        isHost = true;
         if(senseInPin == 255){
             #ifdef JVS_VERBOSE
             DBG_SERIAL.println(F("ERROR: NO SENSE INPUT PIN GIVEN"));
@@ -41,7 +41,7 @@ int JVS::begin(bool m, unsigned long _b){
         #ifdef JVS_VERBOSE
         DBG_SERIAL.println(F("JVS: DEVICE MODE"));
         #endif
-        isMaster = false;
+        isHost = false;
         if(senseInPin < 255) {
             pinMode(senseInPin, INPUT_PULLUP);
             #ifdef JVS_VERBOSE
@@ -65,7 +65,7 @@ void JVS::reset(){
 }
 
 void JVS::sendStatus(int s){
-    if(!isMaster){
+    if(!isHost){
         #ifdef JVS_VERBOSE
         DBG_SERIAL.print(F("JVS: SEND STATUS: "));
         DBG_SERIAL.println(s, HEX);
@@ -75,7 +75,7 @@ void JVS::sendStatus(int s){
 }
 
 void JVS::sendReport(int s, int r){
-    if(!isMaster){
+    if(!isHost){
         JVS_Frame report;
         if(r) {
             report.numBytes = 1;            // Send 1 report byte back
@@ -85,7 +85,7 @@ void JVS::sendReport(int s, int r){
             DBG_SERIAL.println(r, HEX);
             #endif
         }
-        report.nodeID = JVS_MASTER_ADDR;
+        report.nodeID = JVS_HOST_ADDR;
         report.statusCode = s;
         write(report);
     } 
@@ -93,7 +93,7 @@ void JVS::sendReport(int s, int r){
 
 void JVS::sendReset(){
     devicesAvailable = 0;
-    if(isMaster){
+    if(isHost){
         JVS_Frame report;
         #ifdef JVS_VERBOSE
         DBG_SERIAL.println(F("JVS: SEND RESET"));
@@ -106,15 +106,15 @@ void JVS::sendReset(){
     } 
     #ifdef JVS_ERROR
     else {
-        DBG_SERIAL.println(F("JVS: Can't send reset, not master"));
+        DBG_SERIAL.println(F("JVS: Can't send reset, not host"));
     }
     #endif
 }
 
 int JVS::setAddress(){
     // Tidy this up?
-    if(isMaster){
-        // Keep sending out addresses to devices until master's sense line is pulled low
+    if(isHost){
+        // Keep sending out addresses to devices until host's sense line is pulled low
         bool _senseIn = digitalRead(senseInPin);
         
         #ifdef JVS_VERBOSE
@@ -217,17 +217,17 @@ int JVS::setAddress(){
     }
     #ifdef JVS_VERBOSE
     else {
-        DBG_SERIAL.println(F("JVS: Can't set addresses, not master"));
+        DBG_SERIAL.println(F("JVS: Can't set addresses, not host"));
     }
     #endif
     return 0;
 }
 
-int JVS::initMaster(){
+int JVS::initHost(){
     // JVS spec says to send reset twice, then auto assign IDs.
     // This should be run after a 5 second grace period at startup
     #ifdef JVS_VERBOSE
-    DBG_SERIAL.println(F("JVS: INIT MASTER"));
+    DBG_SERIAL.println(F("JVS: INIT HOST"));
     #endif
     sendReset();
     delay(35);
@@ -244,7 +244,7 @@ int JVS::initDevice(){
     #ifdef JVS_VERBOSE
     DBG_SERIAL.println(F("JVS: INIT DEVICE"));
     #endif
-    isMaster = false;
+    isHost = false;
 
     // Run through feature support and find out the order given
     // This allows runCommand to know where the parameters are kept
@@ -265,7 +265,7 @@ int JVS::write(JVS_Frame &_frame){
     delayMicroseconds(100);
     // Sum is included in Number of bytes, adding 1 allows new users to specify data bytes more intuitively
     // Counts Status, Report, Data and Sum
-    if(isMaster){
+    if(isHost){
         // Data and sum
         _frame.numBytes++; 
     } else {
@@ -282,7 +282,7 @@ int JVS::write(JVS_Frame &_frame){
     _serial->write(_frame.numBytes);   // How many bytes to send (excludes status)
     _serial->flush();
     _frame.numBytes = b;
-    if(!isMaster){
+    if(!isHost){
         // Device needs to sen ack codes
         _serial->write(_frame.statusCode);   // Status code
         _serial->flush();
@@ -326,7 +326,7 @@ int JVS::write(JVS_Frame &_frame){
     DBG_SERIAL.println(_frame.nodeID, HEX);
     DBG_SERIAL.print(F("# of bytes: "));
     DBG_SERIAL.println(_frame.numBytes +1);
-    if(!isMaster){
+    if(!isHost){
         DBG_SERIAL.print(F("Status: "));
         DBG_SERIAL.println(_frame.statusCode);
     }
@@ -385,13 +385,13 @@ int JVS::readFrame(){
         _frame.numBytes = _serial->read();     // Number of packet bytes
         _frame.cmdCount = _frame.numBytes - 1;
         while(!_serial->available());
-        if(isMaster){
+        if(isHost){
         // Device needs to sen ack codes
             _frame.statusCode = _serial->read();   // Status code
             bytesToRead = _frame.numBytes-1;  // For status code
             // Need to process status in future
         } else {
-            // Master will not send these, calculateSum needs them, so blank them for correct sum
+            // Host will not send these, calculateSum needs them, so blank them for correct sum
             _frame.statusCode = 0;
             bytesToRead = _frame.numBytes;
         }
@@ -477,7 +477,7 @@ int JVS::readFrame(){
     DBG_SERIAL.print(F("JVS: For ID: "));
     DBG_SERIAL.println(_frame.nodeID, HEX);
     DBG_SERIAL.print(F("JVS: # of Bytes: "));
-    DBG_SERIAL.println(_frame.numBytes, HEX);
+    DBG_SERIAL.println(_frame.numBytes);
     DBG_SERIAL.println(F("JVS: Data bytes:"));
     for(int db = 0; db < _frame.numBytes-2; db++){
         DBG_SERIAL.println(_frame.data[db], HEX);
@@ -503,14 +503,14 @@ int JVS::readFrame(){
     return _errorCode;
 }
 
-// Set the node ID. 0x00 is reserved for the master, 0xFF for broadcast packets
+// Set the node ID. 0x00 is reserved for the host, 0xFF for broadcast packets
 uint8_t JVS::setID(uint8_t id){
     #ifdef JVS_VERBOSE
     DBG_SERIAL.print(F("JVS: ID: "));
     DBG_SERIAL.println(id);
     #endif
     
-    if(id != JVS_MASTER_ADDR  && id != JVS_BROADCAST_ADDR){
+    if(id != JVS_HOST_ADDR  && id != JVS_BROADCAST_ADDR){
         nodeID = id;
         jvsReady = true;
         setSense(JVS_SENSE_ACTIVE);
@@ -556,7 +556,7 @@ int JVS::runCommand(JVS_Frame &received){
     bool responseNeeded = true;
         JVS_Frame response;
 
-        response.nodeID = JVS_MASTER_ADDR;
+        response.nodeID = JVS_HOST_ADDR;
         for(int c = 0; c < received.numBytes-1; c++){
             //if(c != 0) dataCount++;
 
@@ -714,10 +714,10 @@ int JVS::runCommand(JVS_Frame &received){
                     // Read switch inputs
                     responseNeeded = true;
                     c++;
-                    // If master requests 2 players and IO supports 2, p = 0. 
-                    // Master should not normally request more than what IO supports
+                    // If host requests 2 players and IO supports 2, p = 0. 
+                    // Host should not normally request more than what IO supports
                     if(_info->featureParameters[featureLoc[switchInput]][0] - received.data[c] < 0){
-                        // If master request more players than supported, send error
+                        // If host request more players than supported, send error
                         response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
                     } else {
                         temp = received.data[c++];  // How many players to read
@@ -750,10 +750,10 @@ int JVS::runCommand(JVS_Frame &received){
                     // Read coin inputs
                     responseNeeded = true;
                     c++;    // Get next parameter byte
-                    // If master requests 2 players and IO supports 2, p = 0. 
-                    // Master should not normally request more than what IO supports
+                    // If host requests 2 players and IO supports 2, p = 0. 
+                    // Host should not normally request more than what IO supports
                     if(_info->featureParameters[featureLoc[coinInput]][0] - received.data[c] < 0){
-                        // If master request more players than supported, send error
+                        // If host request more players than supported, send error
                         response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
                     } else {
                         temp = received.data[c];  // How many players to read
@@ -797,7 +797,7 @@ int JVS::runCommand(JVS_Frame &received){
                     responseNeeded = true;
                     temp = received.data[c++];
                     if((_info->featureParameters[featureLoc[gpOutput]][0] - temp) < 0){
-                        // If master request more bytes than supported, send error
+                        // If host request more bytes than supported, send error
                         response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
                     } else {
                         for(int o = 0; o < temp; o++){
@@ -859,7 +859,7 @@ uint8_t JVS::calculateSum(JVS_Frame &_f, bool send){
     uint32_t _s = 0;
     _s += _f.nodeID;
     _s += _f.numBytes;
-    if((!isMaster && send) || (isMaster && !send)){
+    if((!isHost && send) || (isHost && !send)){
         _s += _f.statusCode;
     }
 
@@ -870,7 +870,7 @@ uint8_t JVS::calculateSum(JVS_Frame &_f, bool send){
     return _s;
 }
 
-/* Master mode JVS commands */
+/* Host mode JVS commands */
 
 void JVS::writeOutputs(uint8_t id){
     // Write outputSlots array
@@ -885,7 +885,7 @@ void JVS::writeOutputs(uint8_t id, uint8_t data){
     DBG_SERIAL.println(F("JVS: Write GPO2"));
     #endif
 
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 3;
@@ -905,7 +905,7 @@ void JVS::writeOutputs(uint8_t id, uint16_t num, uint8_t* data){
     DBG_SERIAL.println(F("JVS: Write GPO1"));
     #endif
 
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = num + 2;
@@ -927,7 +927,7 @@ void JVS::writeOutputByte(uint8_t id, uint16_t idx, uint8_t data){
     DBG_SERIAL.println(F("JVS: Write GPO2"));
     #endif
 
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 3;
@@ -947,7 +947,7 @@ void JVS::writeOutputBit(uint8_t id, uint16_t idx, uint8_t data){
     DBG_SERIAL.println(F("JVS: Write GPO3"));
     #endif
     
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 3;
@@ -961,7 +961,7 @@ void JVS::writeOutputBit(uint8_t id, uint16_t idx, uint8_t data){
 
 void JVS::ioIdentify(uint8_t id){
     // Send IO Identify command to ID
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 1;
@@ -973,7 +973,7 @@ void JVS::ioIdentify(uint8_t id){
 void JVS::requestVersions(uint8_t id){
     // Send version request as concatenated packet
     // Read reply in order of CMD Rev, JVS Rev, COM Version and then supported features
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 4;
@@ -987,7 +987,7 @@ void JVS::requestVersions(uint8_t id){
 
 void JVS::writeMainID(uint8_t id){
     // Write the ID string located in _info under mainID
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 1;
@@ -1010,7 +1010,7 @@ void JVS::writeMainID(uint8_t id){
 
 void JVS::readSwitches(uint8_t id, uint8_t p, uint8_t d){
     // Request switch data from ID. P = How many players, D = how many bytes per player
-    if(isMaster && p > 0 && d > 0){
+    if(isHost && p > 0 && d > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 3;
@@ -1023,7 +1023,7 @@ void JVS::readSwitches(uint8_t id, uint8_t p, uint8_t d){
 
 void JVS::readCoins(uint8_t id, uint8_t c){
     // Request coin data from ID. C = How many coin slots to read
-    if(isMaster && c > 0){
+    if(isHost && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 2;
@@ -1035,7 +1035,7 @@ void JVS::readCoins(uint8_t id, uint8_t c){
 
 void JVS::readAnalog(uint8_t id, uint8_t c){
     // Request analog data from ID. C = How many channels to read
-    if(isMaster && c > 0){
+    if(isHost && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 2;
@@ -1047,7 +1047,7 @@ void JVS::readAnalog(uint8_t id, uint8_t c){
 
 void JVS::writeAnalog(uint8_t id, uint8_t c, uint16_t d){
     // Request misc. switch data from ID. B = how many bytes to read
-    if(isMaster && c > 0){
+    if(isHost && c > 0){
         JVS_Frame out;
         out.numBytes = 4;
         out.data[0] = JVS_ANALOGOUT_CODE;
@@ -1060,7 +1060,7 @@ void JVS::writeAnalog(uint8_t id, uint8_t c, uint16_t d){
 
 void JVS::writeAnalog(uint8_t id, uint8_t c, uint16_t* d){
     // Request misc. switch data from ID. B = how many bytes to read
-    if(isMaster && c > 0 && c < 250 && d != NULL){
+    if(isHost && c > 0 && c < 250 && d != NULL){
         JVS_Frame out;
         out.numBytes = 2;
         out.data[0] = JVS_ANALOGOUT_CODE;
@@ -1076,7 +1076,7 @@ void JVS::writeAnalog(uint8_t id, uint8_t c, uint16_t* d){
 
 void JVS::writeCharacter(uint8_t id, uint8_t d){
     // Request misc. switch data from ID. B = how many bytes to read
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.numBytes = 3;
         out.data[0] = JVS_CHARACTEROUT_CODE;
@@ -1088,7 +1088,7 @@ void JVS::writeCharacter(uint8_t id, uint8_t d){
 
 void JVS::writeCharacter(uint8_t id, uint8_t c, uint8_t* d){
     // Request misc. switch data from ID. B = how many bytes to read
-    if(isMaster && c > 0 && c < 250 && d != NULL){
+    if(isHost && c > 0 && c < 250 && d != NULL){
         JVS_Frame out;
         out.numBytes = 2;
         out.data[0] = JVS_CHARACTEROUT_CODE;
@@ -1103,7 +1103,7 @@ void JVS::writeCharacter(uint8_t id, uint8_t c, uint8_t* d){
 
 void JVS::readRotary(uint8_t id, uint8_t c){
     // Request rotary data from ID. C = How many channels to read
-    if(isMaster && c > 0){
+    if(isHost && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 2;
@@ -1115,7 +1115,7 @@ void JVS::readRotary(uint8_t id, uint8_t c){
 
 void JVS::readKeypad(uint8_t id){
     // Request keypad data from ID.
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 1;
@@ -1126,7 +1126,7 @@ void JVS::readKeypad(uint8_t id){
 
 void JVS::readSceenPos(uint8_t id, uint8_t c){
     // Request touch screen position data from ID. C = Channel index
-    if(isMaster && c > 0){
+    if(isHost && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 2;
@@ -1138,7 +1138,7 @@ void JVS::readSceenPos(uint8_t id, uint8_t c){
 
 void JVS::readMiscSwitch(uint8_t id, uint8_t b){
     // Request misc. switch data from ID. B = how many bytes to read
-    if(isMaster && b > 0){
+    if(isHost && b > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 2;
@@ -1150,7 +1150,7 @@ void JVS::readMiscSwitch(uint8_t id, uint8_t b){
 
 void JVS::readPayout(uint8_t id, uint8_t c){
     // Request payout hopper data from ID. c = Which channel to read
-    if(isMaster && c > 0){
+    if(isHost && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 2;
@@ -1162,7 +1162,7 @@ void JVS::readPayout(uint8_t id, uint8_t c){
 
 void JVS::requestRetransmit(uint8_t id){
     // Request retransmit of last packet
-    if(isMaster){
+    if(isHost){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 1;
@@ -1173,7 +1173,7 @@ void JVS::requestRetransmit(uint8_t id){
 
 void JVS::increaseCoin(uint8_t id, uint8_t s, uint16_t c){
     // Increment coin counter amount on IO. S = Which slot, C = Amount
-    if(isMaster && s > 0 && c > 0){
+    if(isHost && s > 0 && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 4;
@@ -1187,7 +1187,7 @@ void JVS::increaseCoin(uint8_t id, uint8_t s, uint16_t c){
 
 void JVS::decreaseCoin(uint8_t id, uint8_t s, uint16_t c){
     // Decrement coin counter amount on IO. S = Which slot, C = Amount
-    if(isMaster && s > 0 && c > 0){
+    if(isHost && s > 0 && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 4;
@@ -1201,7 +1201,7 @@ void JVS::decreaseCoin(uint8_t id, uint8_t s, uint16_t c){
 
 void JVS::increasePayout(uint8_t id, uint8_t s, uint16_t c){
     // Increase payout amount for IO to issue. S = Which slot, C = Amount
-    if(isMaster && s > 0 && c > 0){
+    if(isHost && s > 0 && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 4;
@@ -1215,7 +1215,7 @@ void JVS::increasePayout(uint8_t id, uint8_t s, uint16_t c){
 
 void JVS::decreasePayout(uint8_t id, uint8_t s, uint16_t c){
     // Increase payout amount for IO to issue. S = Which slot, C = Amount
-    if(isMaster && s > 0 && c > 0){
+    if(isHost && s > 0 && c > 0){
         JVS_Frame out;
         out.nodeID = id;
         out.numBytes = 4;
