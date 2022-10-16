@@ -1713,7 +1713,7 @@
   (no_connect (at 181.61 51.435) (uuid c73c66a5-367d-46fb-817b-b40c8151774d))
   (no_connect (at 181.61 86.995) (uuid d36f9446-50f9-47b6-90b5-37d2db55f400))
   (no_connect (at 83.82 58.42) (uuid d3ad6cc5-4d29-4ea0-9a9e-6dc1b57f7169))
-  (no_connect (at 66.675 58.42) (uuid d3ad6cc5-4d29-4ea0-9a9e-6dc1b57f7169))
+  (no_connect (at 66.675 58.42) (uuid d3ad6cc5-4d29-4ea0-9a9e-6dc1b57f716a))
   (no_connect (at 181.61 48.895) (uuid de3a2e78-e256-4077-b4fe-997fb2384360))
 
   (wire (pts (xy 130.81 147.32) (xy 130.81 153.67))
@@ -3225,7 +3225,7 @@
     (in_bom yes) (on_board yes)
     (uuid 3236e942-6e02-4559-a957-ea58a9f439fc)
     (property "Reference" "R13" (id 0) (at 92.075 140.335 90))
-    (property "Value" "103" (id 1) (at 92.71 142.24 90))
+    (property "Value" "102" (id 1) (at 92.71 142.24 90))
     (property "Footprint" "Resistor_SMD:R_1206_3216Metric" (id 2) (at 92.71 144.78 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3676,7 +3676,7 @@
     (in_bom yes) (on_board yes)
     (uuid b241b830-f726-45f1-8a7b-e737c306a76b)
     (property "Reference" "R14" (id 0) (at 95.25 154.305 90))
-    (property "Value" "103" (id 1) (at 95.885 156.21 90))
+    (property "Value" "102" (id 1) (at 95.885 156.21 90))
     (property "Footprint" "Resistor_SMD:R_1206_3216Metric" (id 2) (at 95.885 158.75 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -4041,10 +4041,10 @@
       (reference "R12") (unit 1) (value "103") (footprint "Resistor_SMD:R_1206_3216Metric")
     )
     (path "/3236e942-6e02-4559-a957-ea58a9f439fc"
-      (reference "R13") (unit 1) (value "103") (footprint "Resistor_SMD:R_1206_3216Metric")
+      (reference "R13") (unit 1) (value "102") (footprint "Resistor_SMD:R_1206_3216Metric")
     )
     (path "/b241b830-f726-45f1-8a7b-e737c306a76b"
-      (reference "R14") (unit 1) (value "103") (footprint "Resistor_SMD:R_1206_3216Metric")
+      (reference "R14") (unit 1) (value "102") (footprint "Resistor_SMD:R_1206_3216Metric")
     )
     (path "/e4331afd-0e42-468d-934f-3b5b019cd145"
       (reference "R15") (unit 1) (value "103") (footprint "Resistor_SMD:R_1206_3216Metric")
