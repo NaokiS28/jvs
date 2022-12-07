@@ -1,38 +1,55 @@
+
+
 #ifndef JVS_CPP
 #define JVS_CPP
 
 #include "jvs.h"
-
-JVS::JVS(HardwareSerial &_ser, int _sense, int _rts){
+/*
+JVS::JVS(HardwareSerial &_ser, int _rts, int _senseOut){
     _serial = &_ser;
-    sensePin = _sense;
+    senseOutPin = _sense;
     senseInPin = 255;
     rtsPin = _rts;
+
 }
 
-JVS::JVS(HardwareSerial &_ser, int _sense, int _rts, int _senseIn){
+JVS::JVS(HardwareSerial &_ser, int _rts, int _senseOut, int _senseIn){
     _serial = &_ser;
-    sensePin = _sense;
+    senseOutPin = _senseOut;
     senseInPin = _senseIn;
     rtsPin = _rts;
+}*/
+
+JVS::JVS(HardwareSerial &_ser, bool m, int _rts, int _senseA, int _senseB){
+    _serial = &_ser;
+    rtsPin = _rts;
+
+    if(m == HOST_NODE){
+        senseOutPin = 255;
+        senseInPin = _senseA;
+        isHost = HOST_NODE;
+    } else {
+        senseOutPin = _senseA;
+        senseInPin = _senseB;
+        isHost = DEVICE_NODE;
+    }
 }
 
-int JVS::begin(bool m, unsigned long _b){
+int JVS::begin(unsigned long _b){
     int errorCode = 0;
     _serial->begin(_b);     // 115200 baud with 8N1 encoding
     pinMode(rtsPin, OUTPUT);
     digitalWrite(rtsPin, LOW);
 
-    if(m == HOST_NODE){
+    if(isHost == HOST_NODE){
         #ifdef JVS_VERBOSE
         DBG_SERIAL.println(F("JVS: HOST MODE"));
         #endif
         // This is the host node
         nodeID = JVS_HOST_ADDR;
-        isHost = true;
         if(senseInPin == 255){
             #ifdef JVS_VERBOSE
-            DBG_SERIAL.println(F("ERROR: NO SENSE INPUT PIN GIVEN"));
+            DBG_SERIAL.println(F("JVS Error: Invalid sense pin?"));
             #endif
         } else {
             pinMode(senseInPin, INPUT_PULLUP);
@@ -41,14 +58,13 @@ int JVS::begin(bool m, unsigned long _b){
         #ifdef JVS_VERBOSE
         DBG_SERIAL.println(F("JVS: DEVICE MODE"));
         #endif
-        isHost = false;
-        if(senseInPin < 255) {
+        if(senseInPin != 255) {
             pinMode(senseInPin, INPUT_PULLUP);
             #ifdef JVS_VERBOSE
             DBG_SERIAL.println(F("JVS: Downstream Enabled"));
             #endif
         }
-        pinMode(sensePin, OUTPUT);
+        pinMode(senseOutPin, OUTPUT);
         setSense(JVS_SENSE_INACTIVE);         // Set sense pin to 2.5v
     }
 
@@ -525,8 +541,8 @@ int JVS::update(){
     byte code = 0;
     if(_serial->available()){
         byte result = readFrame(); // lastReceived = millis();
-        if(result != 0) code = result;
-        else code = available();
+        if(result != 0) code = -10 + result;
+        else code = true;
     } 
     return code;
 }
@@ -544,6 +560,20 @@ int JVS::runCommand(){
 }
 
 int JVS::runCommand(JVS_Frame &received){
+    if(isHost){
+       #ifdef JVS_ERROR
+        DBG_SERIAL.println("JVS Error: runCommand only works in device mode!");
+        #endif
+        return -1; 
+    }
+
+    if(_info == NULL){
+        #ifdef JVS_ERROR
+        DBG_SERIAL.println("JVS Error: Info array not set, runCommand will likely fail!");
+        #endif
+        return -2;
+    }
+
     int  errorCode = 0;
     // Read the command byte
     uint8_t dataCount = 0;
@@ -551,7 +581,7 @@ int JVS::runCommand(JVS_Frame &received){
     int temp = 0;       // Generic temp int
     int tempB = 0;      // Generic temp int
     //int tempC = 0;      // Generic temp int
-    bool n = false;
+    bool n = false;     // 
 
     bool responseNeeded = true;
         JVS_Frame response;
@@ -570,10 +600,6 @@ int JVS::runCommand(JVS_Frame &received){
             }
 
             #ifdef JVS_VERBOSE_CMD
-            //DBG_SERIAL.print(F("C: "));
-            //DBG_SERIAL.println(c);
-            //DBG_SERIAL.print(F("CM: "));
-            //DBG_SERIAL.println(received.numBytes-1);
             DBG_SERIAL.print(F("COMMAND: "));
             DBG_SERIAL.println(received.data[c], HEX);
             #endif
@@ -614,7 +640,9 @@ int JVS::runCommand(JVS_Frame &received){
                     #ifdef JVS_VERBOSE
                     DBG_SERIAL.println(F("JVS Recieved: Bad sum, resend"));
                     #endif
-                    //write(_outgoingFrame);
+                    response.statusCode = JVS_STATUS_CHECKSUMERROR;
+                    response.numBytes = 0;
+                    write(response);
                     responseNeeded = false;
                     break;
                 case 0x10:
@@ -712,6 +740,13 @@ int JVS::runCommand(JVS_Frame &received){
 
                 case 0x20:
                     // Read switch inputs
+
+                    if(playerArray == NULL){
+                        #ifdef JVS_ERROR
+                        DBG_SERIAL.println("JVS Error: Host requested switches, player array is NULL!");
+                        #endif
+                        return -3;
+                    }
                     responseNeeded = true;
                     c++;
                     // If host requests 2 players and IO supports 2, p = 0. 
@@ -748,6 +783,13 @@ int JVS::runCommand(JVS_Frame &received){
                     break;
                 case 0x21:
                     // Read coin inputs
+
+                    if(coinSlots == NULL || coinCondition == NULL){
+                        #ifdef JVS_ERROR
+                        DBG_SERIAL.println("JVS Error: Host requested coins, coin slots/condition array is NULL!");
+                        #endif
+                        return -4;
+                    }
                     responseNeeded = true;
                     c++;    // Get next parameter byte
                     // If host requests 2 players and IO supports 2, p = 0. 
@@ -774,6 +816,13 @@ int JVS::runCommand(JVS_Frame &received){
                     break;
                 case 0x30:
                     // Decrease coin counter
+
+                    if(coinSlots == NULL || coinCondition == NULL){
+                        #ifdef JVS_ERROR
+                        DBG_SERIAL.println("JVS Error: Host requested coins, coin slots/condition array is NULL!");
+                        #endif
+                        return -4;
+                    }
                     responseNeeded = true;
 
                         index = received.data[c++];
@@ -784,6 +833,13 @@ int JVS::runCommand(JVS_Frame &received){
                     break;
                 case 0x35:
                     // Increase coin counter
+
+                    if(coinSlots == NULL || coinCondition == NULL){
+                        #ifdef JVS_ERROR
+                        DBG_SERIAL.println("JVS Error: Host requested coins, coin slots/condition array is NULL!");
+                        #endif
+                        return -4;
+                    }
                     responseNeeded = true;
 
                         index = received.data[c++];
@@ -794,6 +850,12 @@ int JVS::runCommand(JVS_Frame &received){
                     break;
                 case 0x32:
                     // GPO 1
+                    if(outputSlots == NULL){
+                        #ifdef JVS_ERROR
+                        DBG_SERIAL.println("JVS Error: Host wrote to output, but output array is NULL!");
+                        #endif
+                        return -5;
+                    }
                     responseNeeded = true;
                     temp = received.data[c++];
                     if((_info->featureParameters[featureLoc[gpOutput]][0] - temp) < 0){
@@ -807,9 +869,14 @@ int JVS::runCommand(JVS_Frame &received){
                     break;
                 // Default case is to send an unknown command response.
                 // Any commands executed before this will still send
+                // Any commands after this will be not be ran.
                 default:
                 case 0x02:
                     // Unknown
+                        #ifdef JVS_ERROR
+                        DBG_SERIAL.print("JVS Warning: Host sent an unkown command: 0x");
+                        DBG_SERIAL.println(received.data[c], HEX);
+                        #endif
                     responseNeeded = true;
                     response.numBytes = 0;  // Data bytes
                     response.statusCode = JVS_STATUS_UNKNOWNCMD;
@@ -818,12 +885,13 @@ int JVS::runCommand(JVS_Frame &received){
                     break;
             }
         }
+
         if(responseNeeded == true){
             response.numBytes = dataCount;
             write(response);
             #ifdef JVS_VERBOSE
+            DBG_SERIAL.println(received.data[0], HEX);
             DBG_SERIAL.println(F("SEND"));
-            DBG_SERIAL.println();
             #endif
         }
     return errorCode;
@@ -839,17 +907,17 @@ void JVS::setSense(bool s){
     DBG_SERIAL.print(F("JVS: SENSE OUT: "));
     if(s == JVS_SENSE_ACTIVE){
         DBG_SERIAL.println("0V");
-        digitalWrite(sensePin, HIGH);
+        digitalWrite(senseOutPin, HIGH);
     }   else {
         DBG_SERIAL.println("2.5V");
-        digitalWrite(sensePin, LOW);
+        digitalWrite(senseOutPin, LOW);
     }
     #else
     if(s == JVS_SENSE_ACTIVE){
         // Set sense output to active
-        digitalWrite(sensePin, HIGH);
+        digitalWrite(senseOutPin, HIGH);
     } else {
-        digitalWrite(sensePin, LOW);
+        digitalWrite(senseOutPin, LOW);
     }
     #endif
 }

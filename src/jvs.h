@@ -1,14 +1,15 @@
 /* 
     JVS Protocol driver
-    NKS 2021
+    NKS 2021-2022
 
     Sense out is timing specific. It must be set low like so:
         If the IO board is the last in the chain:
             Host -> Reset
             Host -> Reset (within 20 ms)
             Host -> SOF 
-            Device -> Set sense low
             Host -> Rest of ID packet.
+            Device -> Set sense low
+            Device -> Send "Status Normal" response
         
         If the IO board is NOT the last in the chain:
             Set sense low after receiving SOF and sense input is low.
@@ -24,12 +25,24 @@
 
 
 // Debugging tools: Use with caution as they may break comms with some hosts
-#define DBG_SERIAL Serial
-#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
+#define DBG_SERIAL Serial           // CHANGE THIS or disable logging if you do not want debug output on this port.
+//#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
 #define JVS_ERROR
 //#define JVS_VERBOSE_LOG_FRAME     // Enables frame logging but will break comms with certain hosts
 //#define JVS_VERBOSE_LOG_CMG       // Same as above but for command packet decoder
 //#define JVS_VERBOSE_CMD
+
+#ifdef JVS_VERBOSE
+#warning "JVS Verbose mode is enabled. You may experience communication issues or disconnects when running in device mode!"
+#endif
+
+#ifdef JVS_VERBOSE_CMD
+#ifdef JVS_VERBOSE_LOG_CMD
+#ifdef JVS_VERBOSE_LOG_FRAME
+#warning "JVS Frame/Command logging is very slow and *will* break device mode!"
+#endif
+#endif
+#endif
 
 
 #define BUFFER_FULL         1
@@ -154,8 +167,9 @@ struct JVS_Controls {
 
 class JVS {
     public:
-    JVS(HardwareSerial &_ser, int _sense, int _rts);
-    JVS(HardwareSerial &_ser, int _sense, int _rts, int _senseIn);
+    //JVS(HardwareSerial &_ser, int _sense, int _rts);                  // Legacy
+    //JVS(HardwareSerial &_ser, int _sense, int _rts, int _senseIn);    // Legacy
+    JVS(HardwareSerial &_ser, bool m, int _rts, int _senseA, int _senseB = 255);
 
     uint8_t nodeID;                // This node's ID
 
@@ -165,14 +179,14 @@ class JVS {
     void sendStatus(int s);
     void sendReport(int s, int r);
 
-    void writePanelSw(byte d) { machineSwitches = d; }
+    void setMachineArray(byte *arr) { machineSwitches = arr; }
     void setPlayerArray(byte *arr) { playerArray = arr; }
     void setAnalogArray(int *arr) { analogArray = arr; }
     void setCoinArray(uint16_t *arr) { coinSlots = arr; }
     void setCoinMechArray(byte *arr) { coinCondition = arr; }
     void setOutputArray(byte *arr) { outputSlots = arr; }
 
-    int begin(bool m, unsigned long _b = JVS_DEFAULT_BUAD);
+    int begin(unsigned long _b = JVS_DEFAULT_BUAD);
     int available();
     int initHost();
     int initDevice();
@@ -224,11 +238,11 @@ class JVS {
     bool rxFlag = false;
     JVS_Frame rxbuffer;
     HardwareSerial* _serial;        // Hardware serial port to use
-    JVS_Info*   _info;              // Pointer to the information array
+    JVS_Info*   _info = NULL;              // Pointer to the information array
     //JVS_Frame   _outgoingFrame;     // JVS frame to send out
 
     // IO
-    byte machineSwitches = 0;       // Button storage for cab switches: 
+    byte* machineSwitches = NULL;       // Button storage for cab switches: 
         // From MSB->LSB: 7: Test, 6: Tilt 1, 5: Tilt 2, 4: Tilt 3, 3-0: Unused
     byte* playerArray = NULL;          // Pointer to player array. This is read as:
     /* byte playerSwitches[4][2] = {
@@ -251,7 +265,7 @@ class JVS {
     bool isHost = false;         // Set to true if this is the host node
     bool jvsReady = false;         // Is set to true when ready to operate
     uint8_t devicesAvailable = 0;     // How many JVS devices are in the chain
-    int sensePin;                  // Sense pin is connected to a 2N2222 transistor.
+    int senseOutPin;                  // Sense pin is connected to a 2N2222 transistor.
     int senseInPin;                // Input sense pin for connecting to downstream IOs
     int rtsPin;                    // Pin for MAX485 transmit enable
     uint8_t featureLoc[16];        // Where the parameters for each feature is stored.
