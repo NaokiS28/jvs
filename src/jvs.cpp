@@ -131,7 +131,7 @@ int JVS::setAddress(){
     // Tidy this up?
     if(isHost){
         // Keep sending out addresses to devices until host's sense line is pulled low
-        bool _senseIn = digitalRead(senseInPin);
+        //bool _senseIn = digitalRead(senseInPin);
         
         #ifdef JVS_VERBOSE
         DBG_SERIAL.println(F("JVS: Set IDs"));
@@ -146,7 +146,7 @@ int JVS::setAddress(){
 
         // Sense no IO board connected
         while(!breakLoop){
-            _senseIn = digitalRead(senseInPin);
+            //_senseIn = digitalRead(senseInPin);
             if(sendReceive){
                 if(!digitalRead(senseInPin)){
                     #ifdef JVS_VERBOSE
@@ -289,17 +289,19 @@ int JVS::write(JVS_Frame &_frame){
     }
 
     uint8_t sumByte = calculateSum(_frame, true);
-
+    _lastSent.sync = _frame.sync;
     _serial->write(_frame.sync);       // Sync byte, E0, must be sent as start of frame (SOF)
-    //_serial->flush();
+    _lastSent.nodeID = _frame.nodeID;
     _serial->write(_frame.nodeID);     // Send to ID
     //_serial->flush();
     
-    _serial->write(_frame.numBytes);   // How many bytes to send (excludes status)
+    _serial->write(_frame.numBytes);   // How many bytes to send
+    _lastSent.numBytes = _frame.numBytes;
     _serial->flush();
     _frame.numBytes = b;
     if(!isHost){
         // Device needs to sen ack codes
+        _lastSent.statusCode = _frame.statusCode;
         _serial->write(_frame.statusCode);   // Status code
         _serial->flush();
         if(_frame.statusCode != JVS_STATUS_NORMAL){
@@ -326,6 +328,7 @@ int JVS::write(JVS_Frame &_frame){
         _serial->write(0xD0);
         sumByte--;
     }
+    _lastSent.sum = _frame.sum;
     _serial->write(sumByte);
     _serial->flush();
     digitalWrite(rtsPin, LOW);
@@ -542,7 +545,7 @@ int JVS::update(){
     if(_serial->available()){
         byte result = readFrame(); // lastReceived = millis();
         if(result != 0) code = -10 + result;
-        else code = true;
+        else code = 1;
     } 
     return code;
 }
@@ -580,7 +583,7 @@ int JVS::runCommand(JVS_Frame &received){
     int index = 0;      // Temp int
     int temp = 0;       // Generic temp int
     int tempB = 0;      // Generic temp int
-    //int tempC = 0;      // Generic temp int
+    int tempC = 0;      // Generic temp int
     bool n = false;     // 
 
     bool responseNeeded = true;
@@ -635,15 +638,6 @@ int JVS::runCommand(JVS_Frame &received){
                         responseNeeded = false;
                     }
                     c++;
-                    break;
-                case 0x2F:
-                    #ifdef JVS_VERBOSE
-                    DBG_SERIAL.println(F("JVS Recieved: Bad sum, resend"));
-                    #endif
-                    response.statusCode = JVS_STATUS_CHECKSUMERROR;
-                    response.numBytes = 0;
-                    write(response);
-                    responseNeeded = false;
                     break;
                 case 0x10:
                     // IO ident
@@ -727,20 +721,19 @@ int JVS::runCommand(JVS_Frame &received){
                 case 0x15:
                     // Main board ident, send ack
                     responseNeeded = true;
-                    memcpy(_info->mainID, received.dataString, 100);
-                    _info->mainID[100] = 0;
+                    //memcpy(_info->mainID, received.dataString, 100);
+                    _info->mainID[99] = 0;  // Always set last byte to 
                     response.statusCode = JVS_STATUS_UNKNOWNCMD;
-                    response.data[dataCount++] = JVS_REPORT_NORMAL;
+                    //response.data[dataCount++] = JVS_REPORT_NORMAL;
                     #ifdef JVS_VERBOSE_CMD_PACKET
                     DBG_SERIAL.print(F("IN: "));
                     DBG_SERIAL.println(_info->mainID);
                     #endif
-                    c+= received.numBytes-1;
+                    dataCount = 0;
                     break;
 
                 case 0x20:
                     // Read switch inputs
-
                     if(playerArray == NULL){
                         #ifdef JVS_ERROR
                         DBG_SERIAL.println("JVS Error: Host requested switches, player array is NULL!");
@@ -748,42 +741,39 @@ int JVS::runCommand(JVS_Frame &received){
                         return -3;
                     }
                     responseNeeded = true;
-                    c++;
-                    // If host requests 2 players and IO supports 2, p = 0. 
-                    // Host should not normally request more than what IO supports
-                    if(_info->featureParameters[featureLoc[switchInput]][0] - received.data[c] < 0){
-                        // If host request more players than supported, send error
-                        response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
-                    } else {
-                        temp = received.data[c++];  // How many players to read
-                        tempB = _info->featureParameters[featureLoc[switchInput]][0];   // How many players
-                        if(tempB >= temp) {
-                            // Set player count to tempB
-                            tempB = temp;
-                        }
-                        temp = received.data[c];  // How many bytes per player
-                        //tempC = _info->featureParameters[featureLoc[switchInput]][1];   // How many switches per player
-                        //Serial.println('S');Serial.println(temp);Serial.println(tempB);Serial.println(tempC);
-                        response.data[dataCount++] = JVS_REPORT_NORMAL; // Byte 0 report
-                        response.data[dataCount++] = machineSwitches;   // Byte 1 Test SW, TILT
 
-                        for(byte p = 0; p < tempB; p++){
+                    c++;
+                    temp = received.data[c++];  // How many players to read
+                    if(temp > _info->featureParameters[featureLoc[switchInput]][0]) {
+                        errorCode = 1;
+                    }
+
+                    tempB = received.data[c++];  // How many bytes per player
+                    if(tempB > (1 * (_info->featureParameters[featureLoc[gpOutput]][1] / 8) + 1)){
+                        errorCode = 1;
+                    } else {
+                        response.data[dataCount++] = JVS_REPORT_NORMAL; // Byte 0 report
+                        response.data[dataCount++] = *machineSwitches;   // Byte 1 Test SW, TILT
+                        for(byte p = 0; p < temp; p++){
                             // Player number
-                            for(byte b = 0; b < temp; b++){
+                            tempC = tempB * p;
+                            for(byte b = 0; b < tempB; b++){
                                 // Byte number
-                                //|| ((b * 8) <= tempC)
-                                if(playerArray != nullptr){
-                                    response.data[dataCount++] = *(playerArray + (2 * p) + b);
-                                } else {
-                                    response.data[dataCount++] = 0;
-                                }
+                                response.data[dataCount++] = playerArray[b + tempC];
                             }
                         }
+                    }
+
+                    if(errorCode){
+                        // If host request more players or buttons than supported, send error
+                        memset(response.data, 0, sizeof(response.data));
+                        dataCount = 0;
+                        response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
+                        errorCode = 0;
                     }
                     break;
                 case 0x21:
                     // Read coin inputs
-
                     if(coinSlots == NULL || coinCondition == NULL){
                         #ifdef JVS_ERROR
                         DBG_SERIAL.println("JVS Error: Host requested coins, coin slots/condition array is NULL!");
@@ -804,9 +794,9 @@ int JVS::runCommand(JVS_Frame &received){
 
                         for(int p = 0; p < temp; p++){
                             // Coin slot number
-                            if(playerArray != nullptr){
-                                response.data[dataCount++] = highByte(*(coinSlots + p));
-                                response.data[dataCount++] = lowByte(*(coinSlots + p));
+                            if(coinSlots != nullptr){
+                                response.data[dataCount++] = highByte(coinSlots[p]);
+                                response.data[dataCount++] = lowByte(coinSlots[p]);
                             } else {
                                 response.data[dataCount++] = 0;
                                 response.data[dataCount++] = 0;
@@ -857,15 +847,26 @@ int JVS::runCommand(JVS_Frame &received){
                         return -5;
                     }
                     responseNeeded = true;
+                    c++;
                     temp = received.data[c++];
-                    if((_info->featureParameters[featureLoc[gpOutput]][0] - temp) < 0){
+                    tempB = 0;
+                    for(int x = 0; x < findFeatureParam(gpOutput, 0); x += 8){
+                        tempB++;
+                    }
+                    if((temp - tempB) < 0){
                         // If host request more bytes than supported, send error
                         response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
                     } else {
+                        response.data[dataCount++] = JVS_REPORT_NORMAL;
                         for(int o = 0; o < temp; o++){
                             outputSlots[o] = received.data[c++];
                         }
                     }
+                    break;
+                case 0x2F:
+                    // Host was not happy with the packet, resend
+                    responseNeeded = false; // We need to send a specific packet back
+                    write(_lastSent);
                     break;
                 // Default case is to send an unknown command response.
                 // Any commands executed before this will still send
@@ -887,7 +888,7 @@ int JVS::runCommand(JVS_Frame &received){
         }
 
         if(responseNeeded == true){
-            response.numBytes = dataCount;
+            if(!errorCode) { response.numBytes = dataCount; }
             write(response);
             #ifdef JVS_VERBOSE
             DBG_SERIAL.println(received.data[0], HEX);
@@ -979,7 +980,7 @@ void JVS::writeOutputs(uint8_t id, uint16_t num, uint8_t* data){
         out.numBytes = num + 2;
         out.data[0] = JVS_GENERICOUT1_CODE;
         out.data[1] = num;
-        for(int m = 0; m < num; m++){
+        for(uint16_t m = 0; m < num; m++){
             out.data[m + 2] = data[m];
         }
         write(out);

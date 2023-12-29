@@ -199,7 +199,7 @@ class JVS {
     uint8_t findFeatureParam(featureTypes t, uint8_t p) {
         // Returns parameter for given feature. IE asking for parameter 0 for gpOutputs will return number of outputs
         if(p > 2) p = 2;
-        _info->featureParameters[featureLoc[t]][p]; 
+        return _info->featureParameters[featureLoc[t]][p]; 
     }
 
     // Host mode commands
@@ -237,14 +237,15 @@ class JVS {
     //CircularBuffer<JVS_Frame,JVS_BUFFER_SIZE> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
     bool rxFlag = false;
     JVS_Frame rxbuffer;
+    JVS_Frame _lastSent;
     HardwareSerial* _serial;        // Hardware serial port to use
     JVS_Info*   _info = NULL;              // Pointer to the information array
     //JVS_Frame   _outgoingFrame;     // JVS frame to send out
 
     // IO
-    byte* machineSwitches = NULL;       // Button storage for cab switches: 
+    uint8_t* machineSwitches = NULL;       // Button storage for cab switches: 
         // From MSB->LSB: 7: Test, 6: Tilt 1, 5: Tilt 2, 4: Tilt 3, 3-0: Unused
-    byte* playerArray = NULL;          // Pointer to player array. This is read as:
+    uint8_t* playerArray = NULL;          // Pointer to player array. This is read as:
     /* byte playerSwitches[4][2] = {
         // Player 1, note that this is single stick. Dual stick uses buttons 1-4 for UDLR
         // Mahjong uses stick and buttons on byte 0 for A-F (Bits 5 - 0), byte 1 for G-N (Bits 7-0)
@@ -257,8 +258,8 @@ class JVS {
         {0,0}       // Player 4
     } */
     uint16_t* coinSlots = NULL;     // Pointer to coin slot counter, read as: literal uint counter [per player]
-    byte* coinCondition = NULL;     // Coin conditions [per player]
-    byte* outputSlots = NULL;
+    uint8_t* coinCondition = NULL;     // Coin conditions [per player]
+    uint8_t* outputSlots = NULL;
     int* analogArray = NULL;
 
 
@@ -268,7 +269,7 @@ class JVS {
     int senseOutPin;                  // Sense pin is connected to a 2N2222 transistor.
     int senseInPin;                // Input sense pin for connecting to downstream IOs
     int rtsPin;                    // Pin for MAX485 transmit enable
-    uint8_t featureLoc[16];        // Where the parameters for each feature is stored.
+    uint8_t featureLoc[32];        // Where the parameters for each feature is stored.
 
     void setSense(bool s);          // Set the sene pin's output. Only slave should do this, host is read-only
     int  setAddress();

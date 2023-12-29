@@ -36,9 +36,8 @@ struct JVS_Frame {
 
 typedef enum {
     endCode, switchInput, coinInput, analogInput, rotaryInput, keycodeInput,
-    screenPosInput, miscInput, reserved1, reserved2, reserved3, reserved4,
-    reserved5, reserved6, reserved7, reserved8, cardSlots, medalOutputs, gpOutput,
-    analogOutput, characterOutput, backupSupport
+    screenPosInput, miscInput, reserved1, reserved2, cardSlots, medalOutputs, 
+    gpOutput, analogOutput, characterOutput, backupSupport
 } featureTypes;
 
 typedef enum {
@@ -50,7 +49,7 @@ struct JVS_Info {
     char ident[100] = "JVS ArduinIO;github.com/NaokiS28/jvs;VER:0.1 Beta";
     char mainID[100] = "ArduinIO Host;github.com/NaokiS28/jvs;VER:0.1 Beta";
     uint8_t cmdRev = 11;    // Some JVS hosts (Triforce) will report ver 0.0 if it's higher than 1.1
-    uint8_t jvsRev = 30;
+    uint8_t jvsRev = 20;
     uint8_t comRev = 10;
     uint8_t totalFeatures = 0;
     featureTypes featureSupport[16] = {
