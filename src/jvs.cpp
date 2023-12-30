@@ -64,6 +64,7 @@ int JVS::begin(unsigned long _b){
             DBG_SERIAL.println(F("JVS: Downstream Enabled"));
             #endif
         }
+        nodeID = 254;
         pinMode(senseOutPin, OUTPUT);
         setSense(JVS_SENSE_INACTIVE);         // Set sense pin to 2.5v
     }
@@ -77,7 +78,15 @@ void JVS::reset(){
     #endif
 
     setSense(JVS_SENSE_INACTIVE);         // High means ID not assigned
-    nodeID = 0;
+    nodeID = 254;
+    if(outputSlots != nullptr) {
+        uint8_t tempB = 0;
+        for(int x = 0; x < findFeatureParam(gpOutput, 0); x += 8){
+            // Count up how many bytes are needed for given parameter
+            tempB++;
+        }
+        memset(outputSlots, 0, tempB);
+    }
 }
 
 void JVS::sendStatus(int s){
@@ -568,6 +577,10 @@ int JVS::runCommand(JVS_Frame &received){
         DBG_SERIAL.println("JVS Error: runCommand only works in device mode!");
         #endif
         return -1; 
+    } else {
+        if(received.nodeID != JVS_BROADCAST_ADDR && received.nodeID != nodeID){
+            return 0;
+        }
     }
 
     if(_info == NULL){
@@ -612,6 +625,7 @@ int JVS::runCommand(JVS_Frame &received){
                     #ifdef JVS_VERBOSE
                     DBG_SERIAL.println(F("JVS Recieved: Reset"));
                     #endif
+                    nodeID = 254;
                     digitalWrite(rtsPin, LOW);
                     reset();
                     responseNeeded = false;
@@ -806,7 +820,6 @@ int JVS::runCommand(JVS_Frame &received){
                     break;
                 case 0x30:
                     // Decrease coin counter
-
                     if(coinSlots == NULL || coinCondition == NULL){
                         #ifdef JVS_ERROR
                         DBG_SERIAL.println("JVS Error: Host requested coins, coin slots/condition array is NULL!");
@@ -823,7 +836,6 @@ int JVS::runCommand(JVS_Frame &received){
                     break;
                 case 0x35:
                     // Increase coin counter
-
                     if(coinSlots == NULL || coinCondition == NULL){
                         #ifdef JVS_ERROR
                         DBG_SERIAL.println("JVS Error: Host requested coins, coin slots/condition array is NULL!");
