@@ -4,531 +4,604 @@
 #define JVS_CPP
 
 #include "jvs.h"
-/*
-JVS::JVS(HardwareSerial &_ser, int _rts, int _senseOut){
-    _serial = &_ser;
-    senseOutPin = _sense;
-    senseInPin = 255;
-    rtsPin = _rts;
-
-}
-
-JVS::JVS(HardwareSerial &_ser, int _rts, int _senseOut, int _senseIn){
-    _serial = &_ser;
-    senseOutPin = _senseOut;
-    senseInPin = _senseIn;
-    rtsPin = _rts;
-}*/
-
-JVS::JVS(HardwareSerial &_ser, bool m, int _rts, int _senseA, int _senseB){
+/**
+ * JVS(*Serial port, *Master/Node, *RTS pin, *Sense pin, Sense pin 2, IO connected pin)
+ * @brief Constructor for the JVS library.
+ * @param _ser:         The serial port to use. Must be a HardwareSerial class.
+ * @param _m:           Use either HOST_NODE or DEVICE_NODE to specify this device's role.
+ * @param _rts:         Specify the pin to use for setting the !REN/TEN pins on the MAX485.
+ * @param _senseA:      In HOST mode, this is the Sense INPUT. In DEVICE mode, this is the sense OUTPUT.
+ * @param _senseB:      (Device only) - This is the Sense INPUT for daisy-chaining IO boards. Not required, use 255 to tell the library to ignore this.
+ * @param _ioConnect:   When in HOST mode or DEVICE mode with daisy chaining, the pin given here will be used to test for IO Board presence. Not required.
+*/
+JVS::JVS(HardwareSerial &_ser, bool _m, int _rts, int _senseA, int _senseB, int _ioConnect){
     _serial = &_ser;
     rtsPin = _rts;
 
-    if(m == HOST_NODE){
+    classOpMode = useUART;
+
+    if(_m == HOST_NODE){
         senseOutPin = 255;
         senseInPin = _senseA;
+        if (_ioConnect != 255) { ioConnectedPin = _ioConnect; }
         isHost = HOST_NODE;
     } else {
         senseOutPin = _senseA;
         senseInPin = _senseB;
         isHost = DEVICE_NODE;
     }
+    if (_ioConnect != 255) { ioConnectedPin = _ioConnect; }
 }
 
+/**
+ * JVS(*USB Serial port, *Master/Node, *RTS pin, *Sense pin, Sense pin 2, IO connected pin)
+ * @brief Constructor for the JVS library.
+ * @param _ser:         The serial port to use. Must be a HardwareSerial class.
+ * @param _m:           Use either HOST_NODE or DEVICE_NODE to specify this device's role.
+*/
+JVS::JVS(usb_serial_class &_ser, bool _m){
+    _usb = &_ser;
+    rtsPin = 255;
+
+    classOpMode = useUSB;
+
+    senseOutPin = 255;
+    senseInPin = 255;
+    ioConnectedPin = 255;
+
+    if(_m == HOST_NODE){
+        isHost = HOST_NODE;
+    } else {
+        isHost = DEVICE_NODE;
+    }
+}
+
+/**
+ * JVS(*USB Serial port, *Master/Node, *RTS pin, *Sense pin, Sense pin 2, IO connected pin)
+ * @brief Constructor for the JVS library.
+ * @param _ser:         The serial port to use. Must be a HardwareSerial class.
+ * @param _m:           Use either HOST_NODE or DEVICE_NODE to specify this device's role.
+*/
+JVS::JVS(usb_serial_class &_ser, bool _m, bool _USEBETA){
+    _usb = &_ser;
+    rtsPin = 255;
+
+    classOpMode = useBUFFER;
+
+    senseOutPin = 255;
+    senseInPin = 255;
+    ioConnectedPin = 255;
+
+    if(_m == HOST_NODE){
+        isHost = HOST_NODE;
+    } else {
+        isHost = DEVICE_NODE;
+    }
+}
+
+/**
+ * JVS(*Rx Buffer (uint8_t *), *Tx Buffer (uint8_t *), *Master/Node, *Sense pin 1 (uint8_t *), Sense pin 2 (uint8_t *))
+ * You should make sure to use the getSenseOutState and setSenseInState when using this constructor.
+ * @brief Constructor for the JVS library.
+ * @param _ser:         The serial port to use. Must be a HardwareSerial class.
+ * @param _rx:          RX buffer to read from
+ * @param _rxSize:      RX buffer size (recommended minimum is 64 bytes)
+ * @param _tx:          TX buffer to read from
+ * @param _txSize:      TX buffer size (recommended minimum is 64 bytes)
+ * @param _m:           Use either HOST_NODE or DEVICE_NODE to specify this device's role.
+*/
+JVS::JVS(FIFO_Buffer &_rx, FIFO_Buffer &_tx, bool _m){
+    //_rxBuff = &_rx;
+    //_txBuff = &_tx;
+
+    classOpMode = useBUFFER;
+
+    _m = HOST_NODE;
+}
+
+/**
+ * begin(_b)
+ * @brief       Inits this JVS instace.
+ * @param _b:   Specify an override for the Baud rate. Note JVS expect 115200 and you *must* start at this baud rate!
+ * @returns:    0 on success, 1 on error.
+*/
 int JVS::begin(unsigned long _b){
     int errorCode = 0;
-    _serial->begin(_b);     // 115200 baud with 8N1 encoding
-    pinMode(rtsPin, OUTPUT);
-    digitalWrite(rtsPin, LOW);
 
-    if(isHost == HOST_NODE){
-        #ifdef JVS_VERBOSE
-        DBG_SERIAL.println(F("JVS: HOST MODE"));
-        #endif
-        // This is the host node
-        nodeID = JVS_HOST_ADDR;
-        if(senseInPin == 255){
-            #ifdef JVS_VERBOSE
-            DBG_SERIAL.println(F("JVS Error: Invalid sense pin?"));
-            #endif
+    switch (classOpMode)
+    {
+    case useUART:
+        _serial->begin(_b);     // 115200 baud with 8N1 encoding
+        pinMode(rtsPin, OUTPUT);
+        digitalWrite(rtsPin, LOW);
+
+        //_rxBuff = new FIFO_Buffer();
+        //_txBuff = new FIFO_Buffer();
+
+        /*if(_rxBuff == nullptr || _txBuff == nullptr){
+            return -1;
+        }*/
+
+        if(isHost == HOST_NODE){
+            // This is the host node
+            nodeID = JVS_HOST_ADDR;
+            if(senseInPin == 255){
+                errorCode = 1;
+            } else {
+                pinMode(senseInPin, INPUT_PULLUP);
+            }
         } else {
-            pinMode(senseInPin, INPUT_PULLUP);
+            if(senseInPin != 255) {
+                pinMode(senseInPin, INPUT_PULLUP);
+            }
+            nodeID = 254;
+            pinMode(senseOutPin, OUTPUT);
+            setSenseOutState(JVS_SENSE_PRESENT);         // Set sense pin to 2.5v
         }
-    } else {
-        #ifdef JVS_VERBOSE
-        DBG_SERIAL.println(F("JVS: DEVICE MODE"));
-        #endif
-        if(senseInPin != 255) {
-            pinMode(senseInPin, INPUT_PULLUP);
-            #ifdef JVS_VERBOSE
-            DBG_SERIAL.println(F("JVS: Downstream Enabled"));
-            #endif
+        break;
+    case useUSB:
+        //_rxBuff = new FIFO_Buffer();
+        //_txBuff = new FIFO_Buffer();
+
+        /*if(_rxBuff == nullptr || _txBuff == nullptr){
+            return -1;
+        }*/
+
+        if(isHost == HOST_NODE){
+            // This is the host node
+            nodeID = JVS_HOST_ADDR;
+        } else {
+            nodeID = 254;
         }
-        nodeID = 254;
-        pinMode(senseOutPin, OUTPUT);
-        setSense(JVS_SENSE_INACTIVE);         // Set sense pin to 2.5v
+        _usb->begin(115200);
+        break;
+    case useBUFFER:
+        break;
+    default:
+        return -1;
+        break;
     }
 
+    if(ioConnectedPin != 255){
+        pinMode(ioConnectedPin, INPUT_PULLUP);
+    }
     return errorCode;
 }
 
-void JVS::reset(){
-    #ifdef JVS_VERBOSE
-    DBG_SERIAL.println(F("JVS: RESET"));
-    #endif
 
-    setSense(JVS_SENSE_INACTIVE);         // High means ID not assigned
-    nodeID = 254;
-    if(outputSlots != nullptr) {
-        uint8_t tempB = 0;
-        for(int x = 0; x < findFeatureParam(gpOutput, 0); x += 8){
-            // Count up how many bytes are needed for given parameter
-            tempB++;
+/**
+ * reset()
+ * @brief (Node only) - Resets the JVS library when in Node mode. Host is never reset.
+ * @returns:    Nothing.
+*/
+void JVS::resetNode(){
+    if(!isHost){
+        setSenseOutState(JVS_SENSE_PRESENT);         // High means ID not assigned
+        nodeID = 254;
+        // If we were handling other things like analog outputs, we would need to clear those too.
+        if(outputSlots != nullptr) {
+            uint8_t tempB = 0;
+            for(int x = 0; x < findFeatureParam(gpOutput, 0); x += 8){
+                // Count up how many bytes are needed for given parameter
+                tempB++;
+            }
+            memset(outputSlots, 0, tempB);
         }
-        memset(outputSlots, 0, tempB);
     }
 }
 
-void JVS::sendStatus(int s){
-    if(!isHost){
-        #ifdef JVS_VERBOSE
-        DBG_SERIAL.print(F("JVS: SEND STATUS: "));
-        DBG_SERIAL.println(s, HEX);
-        #endif
-        sendReport(s, 0);
-    } 
-}
-
-void JVS::sendReport(int s, int r){
+/**
+ * sendStatus(int):
+ * @brief       (Node only) - Send an empty status frame back to the Host in cases such as an unknown command or bad sum.
+ * @param _s:   The status code to send, options can be JVS_STATUSCODE_UNKNOWNCMD, JVS_STATUSCODE_OVERFLOW or JVS_STATUSCODE_CHECKSUMERROR
+ * @returns:    Status of the packet transmission
+*/
+int JVS::sendStatus(int _s){
     if(!isHost){
         JVS_Frame report;
-        if(r) {
-            report.numBytes = 1;            // Send 1 report byte back
-            report.data[0] = r;
-            #ifdef JVS_VERBOSE
-            DBG_SERIAL.print(F("JVS: SEND REPORT: "));
-            DBG_SERIAL.println(r, HEX);
-            #endif
-        }
         report.nodeID = JVS_HOST_ADDR;
-        report.statusCode = s;
-        write(report);
-    } 
-}
-
-void JVS::sendReset(){
-    devicesAvailable = 0;
-    if(isHost){
-        JVS_Frame report;
-        #ifdef JVS_VERBOSE
-        DBG_SERIAL.println(F("JVS: SEND RESET"));
-        #endif
-        report.numBytes = 2;
-        report.nodeID = JVS_BROADCAST_ADDR;
-        report.data[0] = JVS_RESET_CODE;
-        report.data[1] = 0xD9;  // This doesn't change, neither does the code but cest la vie
-        write(report);
-    } 
-    #ifdef JVS_ERROR
-    else {
-        DBG_SERIAL.println(F("JVS: Can't send reset, not host"));
+        report.statusCode = _s;
+        return write(report);
     }
-    #endif
+    return -1;
 }
 
-int JVS::setAddress(){
-    // Tidy this up?
+/**
+ *  sendReset():
+ *  @brief      (Host only) - Sends a reset sequence to all nodes.
+ *  @returns    0 on success, 1 on error.
+*/
+int JVS::sendReset(){
+    if(isHost){
+        uint8_t dataBytes[2] = {JVS_RESET_CODE, 0xD9};
+        JVS_Frame report(JVS_BROADCAST_ADDR, 2, dataBytes, 0, true, true);
+        
+        int errorCode = 0;
+        for(int i = 0; i < 2; i++){
+            errorCode = write(report);
+            if(errorCode){
+                return errorCode;
+            }
+            delay(10);
+        }
+        return errorCode;
+    } else {
+        return 1;
+    }
+}
+
+/**
+ *  _queryNodes():
+ *  @brief      (Host only) - Queries all connected nodes and assigns them an ID until the Sense line is brought low.
+ *  @returns    (int) Number of connected nodes, -1: General error, -10: No IOs present, -11: No response was given, -12: bad response
+*/
+int JVS::_queryNodes(){
+    int errorCode = -1;
+    //bool senseLine = digitalRead(senseInPin);
+    bool done = false;
+    byte iosFound = 0;
+    byte idNumber = 0x01;
+    byte tryCount = 0;
+
     if(isHost){
         // Keep sending out addresses to devices until host's sense line is pulled low
-        //bool _senseIn = digitalRead(senseInPin);
-        
-        #ifdef JVS_VERBOSE
-        DBG_SERIAL.println(F("JVS: Set IDs"));
-        #endif
+        if(ioConnectedPin != 255){
+            // IO Presence pin is here, use it
+            if(!digitalRead(ioConnectedPin)) {   // High when IO board not present
+                errorCode = -10;
+            }
+        } else {
+            while (!done){
+                JVS_Frame query;
+                query.nodeID = JVS_BROADCAST_ADDR;
+                query.data[0] = idNumber;
 
-        uint8_t _id = 0x01; // Start at ID 1
-        uint8_t _try = 0;
-        uint32_t recTimeout;
-
-        bool sendReceive = 1;   // 1 Send new address, 0 received confirmation
-        bool breakLoop = false;
-
-        // Sense no IO board connected
-        while(!breakLoop){
-            //_senseIn = digitalRead(senseInPin);
-            if(sendReceive){
-                if(!digitalRead(senseInPin)){
-                    #ifdef JVS_VERBOSE
-                    if(digitalRead(senseInPin) == LOW) DBG_SERIAL.println(F("JVS: Sense low"));
-                    #endif
-                    breakLoop = true;
+                int txStatus = write(query);
+                if(txStatus) { return txStatus; }
+                JVS_Frame reply = waitForReply();
+                if(reply.sync != JVS_SYNC) { 
+                    if(tryCount < 3) tryCount++;
+                    else return -11;
                 } else {
-                #ifdef JVS_VERBOSE
-                DBG_SERIAL.print(F("JVS: SEND ID: "));
-                DBG_SERIAL.println(_id);
-                #endif
-                JVS_Frame _request;
-                // Send new address out
-                // Send the address change message
-                _request.nodeID = JVS_BROADCAST_ADDR;
-                _request.numBytes = 2;
-                _request.data[0] = JVS_SETADDR_CODE;
-                _request.data[1] = _id; 
-                write(_request);
-                recTimeout = millis();
-                sendReceive = 0;
-                }
-            } else {
-                if(update()){
-                    // Frame received from device
-                    JVS_Frame _receivedFrame;
-                    read(_receivedFrame);
-                    if(_receivedFrame.data[0] == JVS_REPORT_NORMAL){
-                        if(_id < 0x0F) {
-                            #ifdef JVS_VERBOSE
-                            DBG_SERIAL.print(F("JVS: Found device: "));
-                            DBG_SERIAL.println(_id);
-                            #endif
-                            _id++;
-                            devicesAvailable++;
-                            delay(80);
-                        } else {
-                            #ifdef JVS_ERROR
-                            DBG_SERIAL.println(F("JVS: Devices exceed 0x1F??"));
-                            #endif
-                            break;
+                    // Got reply
+                    if(reply.statusCode != JVS_STATUS_NORMAL || reply.data[0] != JVS_REPORT_NORMAL){ return -12; }
+                    else if(reply.statusCode == JVS_STATUS_NORMAL && reply.data[0] == JVS_REPORT_NORMAL){
+                        idNumber++;
+                        iosFound++;
+                    } 
+                    if(classOpMode != useUSB){
+                        if(!digitalRead(senseInPin)){
+                            // Sense in low, last IO board was assigned
+                            done = true;
+                            errorCode = iosFound;
                         }
-                        sendReceive = 1;
-                        _try = 0;
-                    } else if (_try < 3){
-                        sendReceive = 1;
-                        _try++;
-                        #ifdef JVS_ERROR
-                        DBG_SERIAL.print(F("JVS: Bad response from device: 0x"));
-                        DBG_SERIAL.println(_receivedFrame.data[0], HEX);
-                        #endif
-                    } else {
-                        sendReceive = 0;
-                        #ifdef JVS_ERROR
-                        DBG_SERIAL.println(F("JVS: Gave up trying"));
-                        #endif
                     }
-                } /*else if(_id < 0x0F && (millis() - recTimeout) >= 150 && digitalRead(senseInPin) == HIGH){
-                    _id++;
-                    endReceive = 1;
-                } */else if((millis() - recTimeout) >= 150){
-                    #ifdef JVS_ERROR
-                    DBG_SERIAL.println(F("JVS: Timeout error whilst waiting for report"));
-                    #endif
-                    breakLoop = true;
                 }
             }
         }
-
-        if(devicesAvailable == 0){
-            // No devices were found
-            #ifdef JVS_ERROR
-            DBG_SERIAL.println(F("JVS: No JVS devices found"));
-            #endif
-            return 0;
-        } else {
-            #ifdef JVS_VERBOSE
-            DBG_SERIAL.print(F("JVS: Found "));
-            DBG_SERIAL.print(devicesAvailable);
-            DBG_SERIAL.println(F(" device(s)"));
-            #endif
-            return devicesAvailable;
-        }
     }
-    #ifdef JVS_VERBOSE
-    else {
-        DBG_SERIAL.println(F("JVS: Can't set addresses, not host"));
-    }
-    #endif
-    return 0;
+    return errorCode;
 }
 
+/**
+ *  initHost():
+ *  @brief (Host only) - Initializes the JVS library and any connected IO boards.
+ *  @returns (int) Number of connected nodes, -1 on error
+*/
 int JVS::initHost(){
     // JVS spec says to send reset twice, then auto assign IDs.
-    // This should be run after a 5 second grace period at startup
-    #ifdef JVS_VERBOSE
-    DBG_SERIAL.println(F("JVS: INIT HOST"));
-    #endif
+    while(millis() < 5000){
+        // This should be run after a 5 second grace period at startup to allow other IO boards to init.
+    }
     sendReset();
-    delay(35);
-    sendReset();
-    delay(35);
-    byte nodes = setAddress();
-    jvsReady = true;
+    int nodes = _queryNodes();
+    if(nodes) { jvsReady = true; }
     return nodes;
 }
 
-int JVS::initDevice(){
-    // JVS spec says that all devices need to listen to the auto ID function
-    // then set it's sense line low when the node has it's ID.
-    #ifdef JVS_VERBOSE
-    DBG_SERIAL.println(F("JVS: INIT DEVICE"));
-    #endif
+/**
+ * initDevice(_in):
+ * @brief       (Device only) - Initializes the JVS library in device mode.
+ * @param _in:  JVS_Info array which is needed for running runCommand().
+ * @returns     (int) 0 on sucess, 1 if no info array was passed.
+*/
+int JVS::initDevice(JVS_Info &_in){
     isHost = false;
 
+    _info = &_in;
     // Run through feature support and find out the order given
     // This allows runCommand to know where the parameters are kept
-    for(int i = 0; i < _info->totalFeatures; i++){
-        featureLoc[_info->featureSupport[i]] = i;
+    if(_info != nullptr){
+        for(int i = 0; i < _info->totalFeatures; i++){
+            featureLoc[_info->featureSupport[i]] = i;
+        }
+        return 0;
+    } else {
+        return 1;
     }
+}
+
+/**
+ * initDevice(_in):
+ * @brief       (Device only) - Initializes the JVS library in device mode.
+ * @param _in:  JVS_Info array which is needed for running runCommand().
+ * @returns     (int) 0 on sucess, 1 if no info array was passed.
+*/
+int JVS::initDevice(){
+    isHost = false;
     return 0;
 }
 
+/**
+ * write(JVS_Frame):
+ * @brief           Writes a JVS packet to the UART port.
+ * @param _frame:   JVS_Frame packet to send. This will be stored in-case of retries.
+ * @returns         (int) 0 on sucess, 1 if no info array was passed.
+*/
 int JVS::write(JVS_Frame &_frame){
-    while(millis() - lastSent < 40);
+    writeFrame(_frame);
+    _lastSent = _frame;
 
-    uint8_t d = 0;
-    uint8_t b = _frame.numBytes;
-    uint8_t errorCode = 0;
+    return 0;
+}
 
-    digitalWrite(rtsPin, HIGH);
-    delayMicroseconds(100);
-    // Sum is included in Number of bytes, adding 1 allows new users to specify data bytes more intuitively
-    // Counts Status, Report, Data and Sum
-    if(isHost){
-        // Data and sum
-        _frame.numBytes++; 
-    } else {
-        _frame.numBytes+= 2; // For Status and Sum byte
+int JVS::writeFrame(JVS_Frame &_frame){
+    if(!_frame.escaped){
+        _frame.EscapePacket();
     }
-
-    uint8_t sumByte = calculateSum(_frame, true);
-    _lastSent.sync = _frame.sync;
-    _serial->write(_frame.sync);       // Sync byte, E0, must be sent as start of frame (SOF)
-    _lastSent.nodeID = _frame.nodeID;
-    _serial->write(_frame.nodeID);     // Send to ID
-    //_serial->flush();
     
-    _serial->write(_frame.numBytes);   // How many bytes to send
-    _lastSent.numBytes = _frame.numBytes;
-    _serial->flush();
-    _frame.numBytes = b;
-    if(!isHost){
-        // Device needs to sen ack codes
-        _lastSent.statusCode = _frame.statusCode;
-        _serial->write(_frame.statusCode);   // Status code
-        _serial->flush();
-        if(_frame.statusCode != JVS_STATUS_NORMAL){
-            errorCode = 2;
-            sumByte = 4;    // Naughty hack
-        }
-    } 
-    if(!errorCode || errorCode == 2){
-        for(int f = 0; f < b; f++){
-            d = _frame.data[f];
-            // As JVS_SYNC is used to signal SOF, this check is to see if D0 needs to be injected to signify
-            //  that the byte is not a SOF.
-            if(d == JVS_SYNC || d == JVS_MARK) {
-                _serial->write(JVS_MARK);
-                _serial->write(d-1);
-            } else {
-                _serial->write(d);
-            }
-            _serial->flush();
-        }
-    }
+    uint8_t * msg = _frame.ToArray();
+    uint8_t size = _frame.numBytes + (isHost ? 2 : 3);
 
-    if(sumByte == JVS_SYNC || sumByte == JVS_MARK){
-        _serial->write(0xD0);
-        sumByte--;
+    #ifdef JVS_VERBOSE
+    DBG_SERIAL.println("JVS: writeFrame():");
+    DBG_SERIAL.print("Size: ");
+    DBG_SERIAL.println(size);
+    
+    for(uint8_t i = 0; i < size; i++){
+        DBG_SERIAL.println(msg[i], HEX);
     }
-    _lastSent.sum = _frame.sum;
-    _serial->write(sumByte);
-    _serial->flush();
-    digitalWrite(rtsPin, LOW);
-
-    lastSent = millis();
-
-    // Log after because JVS is impatient
-    #ifdef JVS_VERBOSE_LOG_FRAME
-    DBG_SERIAL.println();
-    DBG_SERIAL.println(F("JVS: Send frame:"));
-    DBG_SERIAL.print(F("Sync: "));
-    DBG_SERIAL.println(_frame.sync, HEX);
-    DBG_SERIAL.print(F("ID: "));
-    DBG_SERIAL.println(_frame.nodeID, HEX);
-    DBG_SERIAL.print(F("# of bytes: "));
-    DBG_SERIAL.println(_frame.numBytes +1);
-    if(!isHost){
-        DBG_SERIAL.print(F("Status: "));
-        DBG_SERIAL.println(_frame.statusCode);
-    }
-    DBG_SERIAL.println(F("Bytes: "));
-    for(int db = 0; db < b; db++){
-        DBG_SERIAL.print(_frame.data[db], HEX);
-        DBG_SERIAL.print(' ');
-    }
-    DBG_SERIAL.println();
-    DBG_SERIAL.print(F("Sum: "));
-    DBG_SERIAL.println(sumByte, HEX);
-    DBG_SERIAL.println();
     #endif
+
+    switch(classOpMode){
+        case useUART:
+            digitalWrite(rtsPin, HIGH);
+            _serial->write(msg, size);
+            _serial->flush();
+            digitalWrite(rtsPin, LOW);
+            break;
+        case useUSB:
+            _usb->write(msg, size);
+            break;
+        case useBUFFER:
+            //_txBuff->push(_frame.ToArray(), _frame.numBytes + 3);
+            txFlag = true;
+            break;
+        default:
+            break;
+    }
+
+    delete msg;
+
     return 0;
 }
 
 int JVS::read(JVS_Frame &_frame){
-    _frame = rxbuffer; //.shift();
+    _frame = rxbuffer;
     rxFlag = false;
     return 0;
 }
 
-int JVS::readFrame(){
-    JVS_Frame _frame;
-    byte _d = _serial->read();
-    byte _errorCode = 1;        // 1 = Bad SOF, 2 = Too big, 3 = Bad sum
-    byte _sum = 0;
-    byte bytesToRead = 0;
-    // Start of Frame
-    if(_d == 0xE0) {
-        _frame.sync = _d;
-        _errorCode = 0;
+JVS_Frame JVS::waitForReply(){
+    JVS_Frame reply;
+    uint32_t startTime = millis();
+    uint16_t timeoutPeriod = 1000;
+    uint8_t tryCount = 0;
+    int _available = 0;
+
+    while(reply.sync != JVS_SYNC){
+        while (!(_available >= 5)){
+            if(classOpMode == useUSB){
+                _available = _usb->available();
+            } else {
+                _available = _serial->available();
+            }
+            if(millis() - startTime > (uint32_t)timeoutPeriod){
+                if (tryCount > 0 && tryCount < 4){
+                    write(_lastSent);
+                    startTime = millis();
+                } else if (tryCount > 3){
+                    // Request timed out
+                    reply.sync = 0xFF;
+                    return reply;
+                } else {
+                    delay(10);
+                }
+            }
+        }
+        read(reply);
     }
-    /*
-    if(_errorCode != 0){
-        // Bad SOF
-        #ifdef JVS_ERROR
-        DBG_SERIAL.print(F("JVS: Bad SOF: 0x"));
-        DBG_SERIAL.println(_frame.sync, HEX);
+    return reply;
+}
+
+int JVS::readFrame(bool _doRetry, uint8_t _idx){
+    #ifdef JVS_VERBOSE_CMD
+    DBG_SERIAL.println(F("JVS readFrame"));
+    #endif
+    JVS_Frame _frame;
+    byte _d = 0x00;
+    //byte _errorCode = 1;        // 1 = Bad SOF, 2 = Too big, 3 = Bad sum
+    byte bytesToRead = 0;
+    byte dataCount = 0;
+    byte index = _idx;
+    //bool retry = _doRetry;
+    bool markReceived = false;
+    int _available  = 0;
+
+    if(classOpMode == useUSB){
+        _available = _usb->available();
+    } else {
+        _available = _serial->available();
+    }
+    
+    #ifdef JVS_VERBOSE
+    DBG_SERIAL.print(F("JVS: readFrame: Bytes available: "));
+    DBG_SERIAL.println(_available);
+    #endif
+
+    if(_available < 5){
+        return 1;
+    }
+
+    uint8_t c = 0;
+    while(index < 6 && _available > 0){
+        if(classOpMode == useUSB){
+            _d = _usb->read();
+            _available = _usb->available();
+            //DBG_SERIAL.println(_d);
+            //DBG_SERIAL.println(_available);
+        } else {
+            _d = _serial->read();
+            _available = _serial->available();
+        }
+        
+        #ifdef JVS_VERBOSE_CMD
+        
+        DBG_SERIAL.print(c++);
+        DBG_SERIAL.print(": ");
+        DBG_SERIAL.println(_d, HEX);
         #endif
-        while(_serial->available()) {
-            uint8_t in = _serial->read();
-            if(in == JVS_SYNC){
-                _errorCode = 0;
-                _frame.sync = in;
+        if(_d == JVS_SYNC && index != 0){
+            #ifdef JVS_VERBOSE_CMD
+            DBG_SERIAL.println("JVS SYNC");
+            #endif
+            return readFrame(true, 1);
+        }
+        if(_d != JVS_MARK){
+            if (markReceived){
+                _d -= 1;
+                markReceived = false;
+            }
+            switch(index){
+                case 0:
+                    // Sync
+                    _frame.sync = _d;
+                    if (_frame.sync == JVS_SYNC){ index++; }
+                    break;
+                case 1:
+                    // ID
+                    _frame.nodeID = _d;
+                    if ((_frame.nodeID == JVS_HOST_ADDR && isHost) || ((_frame.nodeID == nodeID || _frame.nodeID == JVS_BROADCAST_ADDR) && !isHost)){
+                        index++;
+                    } else {
+                        #ifdef JVS_VERBOSE_CMD
+                        DBG_SERIAL.println("JVS Wrong ID");
+                        #endif
+                        return 1;
+                    }
+                    break;
+                case 2:
+                    _frame.numBytes = _d;
+                    bytesToRead = _available;
+                    if (bytesToRead < _frame.numBytes){
+                        if (!_waitForBytes(_frame.numBytes)){
+                            return 1;
+                        }
+                    }
+                    if (_frame.numBytes < 3){
+                        index+=2;
+                    } else {
+                        index++;
+                    }
+                    break;
+                case 3:
+                    if(isHost){
+                        _frame.statusCode = _d;
+                        if(_frame.statusCode != JVS_STATUS_NORMAL){
+                            index++;
+                        }
+                    } else {
+                        _frame.data[dataCount++] = _d;
+                    }
+                    index++;
+                    break;
+                case 4:
+                    _frame.data[dataCount++] = _d;
+                    if(isHost && dataCount >= (_frame.numBytes - 2)){
+                        index++;
+                    } else if(!isHost && dataCount >= (_frame.numBytes - 1)){
+                        index++;
+                    }
+                    break;
+                case 5:
+                    _frame.sum = _d;
+                    index++;
+                    break;
+                default:
+                    index = 0;
+                    break;
+            }
+        } else {
+            markReceived = true;
+        }
+    }
+    if(_frame.sync == JVS_SYNC && _frame.CompareSum(isHost, false)){
+        if(isHost){
+            switch (_frame.statusCode){
+            case JVS_STATUS_NORMAL:
+                rxbuffer = _frame;
+                rxFlag = true;
+                return 0;
+                break;
+            case JVS_STATUS_CHECKSUMERROR:
+                write(_lastSent);
+                _frame = waitForReply();
+                if(_frame.sync == JVS_SYNC){
+                    rxbuffer = _frame;
+                    rxFlag = true;
+                    return 0;
+                } else {
+                    return 1;
+                }
+            default:
+                return _frame.statusCode;
                 break;
             }
-        }
-    }
-    */
-    if(_errorCode == 0) {
-        while(!_serial->available());
-        // Start of frame good
-        _frame.nodeID = _serial->read();       // ID of the packet
-        while(!_serial->available());
-        _frame.numBytes = _serial->read();     // Number of packet bytes
-        _frame.cmdCount = _frame.numBytes - 1;
-        while(!_serial->available());
-        if(isHost){
-        // Device needs to sen ack codes
-            _frame.statusCode = _serial->read();   // Status code
-            bytesToRead = _frame.numBytes-1;  // For status code
-            // Need to process status in future
         } else {
-            // Host will not send these, calculateSum needs them, so blank them for correct sum
-            _frame.statusCode = 0;
-            bytesToRead = _frame.numBytes;
+            rxbuffer = _frame;
+            rxFlag = true;
+            return 0;
         }
-
-        if(_frame.numBytes > JVS_MAX_DATA){    // Max frame size is 102 bytes. Minimum size is 2 bytes (Number of bytes is counted)
-            // Too big
-            _errorCode = 2;
-            #ifdef JVS_ERROR
-            DBG_SERIAL.print(F("JVS: Message has too many data bytes: "));
-            DBG_SERIAL.println(_frame.numBytes);
-            #endif
-        } else {
-            // Check for  blank frame
-            if(_frame.numBytes-1 == 0) {
-                #ifdef JVS_ERROR
-                DBG_SERIAL.println(F("JVS Recieved: Unknown/blank frame"));
-                #endif
-                sendStatus(JVS_STATUS_UNKNOWNCMD);
-                _errorCode = 4;
-            } else {
-                // Read frame data bytes
-                for(int i = 0; i < bytesToRead-1; i++){
-                    while(!_serial->available());
-                    byte b = _serial->read();
-                    if(b == JVS_MARK && (bytesToRead-1 > 0)) {
-                        while(!_serial->available());
-                        byte in = _serial->read();
-                        // Mark received
-                        // This means this byte either equals a SOF byte or Mark byte and so needs to be translated
-                        _frame.data[i] = in+1;
-                    } else {
-                        _frame.data[i] = b;
-                    }
-                }
-            }
-            // Sum byte
-            while(!_serial->available());
-            _frame.sum = _serial->read();
-
-            // Dumping the FCA2 PCB showed that you need to escape the sum byte too
-            if(_frame.sum == 0xD0) {
-                while(!_serial->available());
-                _frame.sum = _serial->read() + 1;
-            }
-
-            // Data read, check sum
-            _sum = calculateSum(_frame);
-
-            if(_frame.sum != _sum){
-                #ifdef JVS_ERROR
-                DBG_SERIAL.print(F("JVS: Received bad sum, expected: 0x"));
-                DBG_SERIAL.print(_sum, HEX);
-                DBG_SERIAL.print(F(" got: 0x"));
-                DBG_SERIAL.println(_frame.sum, HEX);
-                DBG_SERIAL.print("Node: ");
-                DBG_SERIAL.print(_frame.nodeID);
-                DBG_SERIAL.print(" Number of bytes: ");
-                DBG_SERIAL.println(_frame.numBytes);
-                DBG_SERIAL.print("Data Bytes: ");
-                for(int i=1; i < _frame.numBytes; i++){
-                    DBG_SERIAL.print(_frame.data[i], HEX);
-                    DBG_SERIAL.print(", ");
-                }
-                DBG_SERIAL.println();
-                #endif
-                _errorCode = 3;
-                sendStatus(JVS_STATUS_CHECKSUMERROR);
-            }
-        }
-    }
-    if(_errorCode == 0){ //&& rxbuffer.available()){
-        #ifdef JVS_VERBOSE
-        DBG_SERIAL.println(F("JVS Recieved: To buffer"));
+    } else {
+        #ifdef JVS_ERROR
+        DBG_SERIAL.println(F("JVS Error: Frame malformed, dropped."));
         #endif
-        rxFlag = true;
-        rxbuffer = _frame; //.push(_frame);
     }
-    
-    // Log this after as JVS is an impatient protocol
-    #ifdef JVS_VERBOSE_LOG_FRAME
-    DBG_SERIAL.println();
-    DBG_SERIAL.println(F("JVS: Start of Frame"));
-    DBG_SERIAL.print(F("JVS: For ID: "));
-    DBG_SERIAL.println(_frame.nodeID, HEX);
-    DBG_SERIAL.print(F("JVS: # of Bytes: "));
-    DBG_SERIAL.println(_frame.numBytes);
-    DBG_SERIAL.println(F("JVS: Data bytes:"));
-    for(int db = 0; db < _frame.numBytes-2; db++){
-        DBG_SERIAL.println(_frame.data[db], HEX);
-    }
-    DBG_SERIAL.print(F("JVS: Received Sum:"));
-    DBG_SERIAL.println(_frame.sum, HEX);
-    switch(_errorCode){
-        case 1:
-            DBG_SERIAL.print(F("JVS: Bad SOF"));
-            DBG_SERIAL.println(nodeID, HEX);
-            break;
-        case 2:
-            DBG_SERIAL.print(F("JVS: Packet too big"));
-            DBG_SERIAL.println(nodeID, HEX);
-            break;
-        case 3:
-            DBG_SERIAL.print(F("JVS: Bad sum, expected: "));
-            DBG_SERIAL.println(_sum, HEX);
-            break;
-        }
+    return 1;
+}
+
+int JVS::_waitForBytes(uint16_t totalBytes, uint16_t _tO){
+    #ifdef JVS_VERBOSE
+    DBG_SERIAL.print(F("JVS: _waitForBytes("));
+    DBG_SERIAL.print(totalBytes);
+    DBG_SERIAL.println(F(")"));
     #endif
-    
-    return _errorCode;
+    uint16_t timeout = _tO;     // Timeout 
+    uint32_t startTime = millis();
+    int _available = 0;
+
+    while (_available < (int)totalBytes){
+        if(classOpMode == useUSB){
+            _available = _usb->available();
+        } else {
+            _available = _serial->available();
+        }
+
+        if ((millis() - startTime) > timeout){
+            return 0;
+        }
+    }
+    return _available;
 }
 
 // Set the node ID. 0x00 is reserved for the host, 0xFF for broadcast packets
@@ -541,34 +614,65 @@ uint8_t JVS::setID(uint8_t id){
     if(id != JVS_HOST_ADDR  && id != JVS_BROADCAST_ADDR){
         nodeID = id;
         jvsReady = true;
-        setSense(JVS_SENSE_ACTIVE);
+        setSenseOutState(JVS_SENSE_READY);
         //sendReport(JVS_STATUS_NORMAL, JVS_REPORT_NORMAL);
         return 0;
     }
-    return 1;
+    return id;
 }
 
 int JVS::update(){
-    // static uint32_t lastReceived;
-    byte code = 0;
-    if(_serial->available()){
-        byte result = readFrame(); // lastReceived = millis();
-        if(result != 0) code = -10 + result;
-        else code = 1;
-    } 
-    return code;
+    //byte code = 0;
+    switch (classOpMode){
+        case useUART:
+            if(_serial->available() >= 5 && !rxFlag){
+                rxFlag = (readFrame() == 0);
+                //Serial.print("JVS: RX Flag: ");
+                //Serial.println(rxFlag);
+            }
+            /*
+            while(_serial->available()){
+                _rxBuff->push(_serial->read());
+                if(_rxBuff->bufferOverflow()){
+                    break;
+                }
+            }
+            */
+            break;
+        case useUSB:
+            if(_usb->available() >= 5 && !rxFlag){
+                rxFlag = (readFrame() == 0);
+            }
+        /*
+            while(_usb->available()){
+                _rxBuff->push(_usb->read());
+                if(_rxBuff->bufferOverflow()){
+                    break;
+                }
+            }
+            */
+            break;
+        case useBUFFER:
+            break;
+        default:
+            return 0;
+            break;
+    }
+    /*
+    if(_rxBuff->available() >= 5){
+        rxFlag = true;
+    }
+    */
+    return rxFlag;
 }
 
 int JVS::runCommand(){
-    rxFlag = false;
-    return runCommand(rxbuffer);
-    /*
-    if(rxbuffer.size()){
-        JVS_Frame _b = rxbuffer.shift();
-        return runCommand(_b);
-    } else {
-        return 1;
-    }*/
+    if(rxFlag){
+        readFrame();
+        rxFlag = false;
+        return runCommand(rxbuffer);
+    }
+    return 0;
 }
 
 int JVS::runCommand(JVS_Frame &received){
@@ -576,177 +680,211 @@ int JVS::runCommand(JVS_Frame &received){
        #ifdef JVS_ERROR
         DBG_SERIAL.println("JVS Error: runCommand only works in device mode!");
         #endif
-        return -1; 
-    } else {
+        return 1; 
+    } /*else {
         if(received.nodeID != JVS_BROADCAST_ADDR && received.nodeID != nodeID){
             return 0;
         }
-    }
+    }*/
 
     if(_info == NULL){
         #ifdef JVS_ERROR
         DBG_SERIAL.println("JVS Error: Info array not set, runCommand will likely fail!");
         #endif
-        return -2;
+        return 2;
     }
 
     int  errorCode = 0;
     // Read the command byte
     uint8_t dataCount = 0;
-    int index = 0;      // Temp int
-    int temp = 0;       // Generic temp int
+    int _idx = 0;      // Temp int
+    uint16_t temp = 0;       // Generic temp int
     int tempB = 0;      // Generic temp int
     int tempC = 0;      // Generic temp int
-    bool n = false;     // 
+    bool assignID = false;     // To specify whether to take the given ID or wait for downstream ports
 
     bool responseNeeded = true;
-        JVS_Frame response;
+    //JVS_Frame response;
+    struct {
+        uint8_t nodeID = 0;
+        uint8_t data[100];
+        uint8_t statusCode = JVS_STATUS_NORMAL;
+        uint8_t numBytes = 0;
+    } response;
 
-        response.nodeID = JVS_HOST_ADDR;
-        for(int c = 0; c < received.numBytes-1; c++){
-            //if(c != 0) dataCount++;
-
-            if(senseInPin < 255){
-                // Is downstream port reporting an ID (if one exists)
-                n = 0; //digitalRead(senseInPin);
-                #ifdef JVS_VERBOSE
-                DBG_SERIAL.println(senseInPin);
-                DBG_SERIAL.println(n);
-                #endif
-            }
-
-            #ifdef JVS_VERBOSE_CMD
-            DBG_SERIAL.print(F("COMMAND: "));
-            DBG_SERIAL.println(received.data[c], HEX);
-            #endif
-            switch (received.data[c]){
-                // Defaults to doing nothing, user to respond
-                case 0xF0:
+    response.nodeID = JVS_HOST_ADDR;
+    for(int c = 0; c < received.numBytes-1; c++){
+        #ifdef JVS_VERBOSE_CMD
+        DBG_SERIAL.print(F("JVS: runCommand: "));
+        DBG_SERIAL.println(received.data[c], HEX);
+        #endif
+        switch (received.data[c]){
+            // Defaults to doing nothing, user to respond
+            case JVS_RESET_CODE:
+                c++;
+                if(received.data[c] == 0xD9){
                     #ifdef JVS_VERBOSE
                     DBG_SERIAL.println(F("JVS Recieved: Reset"));
                     #endif
                     nodeID = 254;
-                    digitalWrite(rtsPin, LOW);
-                    reset();
+                    resetNode();
                     responseNeeded = false;
-                    c++;
-                    break;
-                case 0xF1:
+                } else {
+                    // Do nothing?
+                }
+                break;
+
+            case JVS_SETADDR_CODE:
+                #ifdef JVS_VERBOSE
+                DBG_SERIAL.println(F("JVS Recieved: Set ID"));
+                #endif
+                c++;    // Get next data byte
+                if(senseInPin != 255){
+                    // if sense in pin isnt 254, then look for dwonstream IO
+                    // Is downstream port reporting an ID (if one exists)
+                    assignID = !digitalRead(senseInPin);
                     #ifdef JVS_VERBOSE
-                    DBG_SERIAL.println(F("JVS Recieved: Set ID"));
+                    DBG_SERIAL.println(senseInPin);
+                    DBG_SERIAL.println((assignID ? "assignID: True" : "assignID: False"));
                     #endif
-                    if(!n){
-                        if(setID(received.data[c+1]) != 0){
-                            #ifdef JVS_VERBOSE
-                            DBG_SERIAL.println(F("JVS Recieved: Couldn't set ID"));
-                            #endif
-                        } else {
-                            responseNeeded = true;
-                            response.statusCode = JVS_STATUS_NORMAL;
-                            response.data[dataCount++] = JVS_REPORT_NORMAL;
-                        }
+                } else {
+                    if(nodeID == 254) {
+                        assignID = true;
+                    }
+                }
+
+                if(assignID){
+                    if(setID(received.data[c]) == 254){
+                        #ifdef JVS_VERBOSE
+                        DBG_SERIAL.println(F("JVS Recieved: Couldn't set ID"));
+                        #endif
                     } else {
                         #ifdef JVS_VERBOSE
-                        DBG_SERIAL.println(F("JVS: Set downstream ID"));
+                        DBG_SERIAL.print(F("JVS: runCommand: nodeID is "));
+                        DBG_SERIAL.println(nodeID, HEX);
                         #endif
-                        responseNeeded = false;
+                        responseNeeded = true;
+                        response.data[dataCount++] = JVS_REPORT_NORMAL;
                     }
-                    c++;
-                    break;
-                case 0x10:
-                    // IO ident
-                    responseNeeded = true;
-                    response.data[dataCount++] = JVS_REPORT_NORMAL;
-                    for(int s = 0; s < 99; s++){
-                        if(_info->ident[s] != 0){
-                            response.data[s+1] = _info->ident[s];
-                            dataCount++;
-                        } else {
-                            response.data[s+1] = 0;
-                            dataCount++;
-                            break;
-                        }
+                } else {
+                    #ifdef JVS_VERBOSE
+                    DBG_SERIAL.println(F("JVS: Set downstream ID"));
+                    #endif
+                    responseNeeded = false;
+                }
+                c++;
+                break;
+
+            case JVS_IOIDENT_CODE:
+                // IO ident
+                #ifdef JVS_VERBOSE
+                DBG_SERIAL.println(F("JVS Recieved: Identify"));
+                #endif
+                responseNeeded = true;
+                response.data[dataCount++] = JVS_REPORT_NORMAL;
+                for(int s = 0; s < 99; s++){
+                    if(_info->ident[s] != 0){
+                        response.data[s+1] = _info->ident[s];
+                        dataCount++;
+                    } else {
+                        response.data[s+1] = 0;
+                        dataCount++;
+                        break;
                     }
-                    response.data[dataCount++] = 0;
-                    #ifdef JVS_VERBOSE_CMD_PACKET
-                    DBG_SERIAL.print(F("OUT: "));
-                    DBG_SERIAL.println(response.dataString);
-                    #endif
-                    break;
-                case 0x11:
-                    // CMD Rev
-                    responseNeeded = true;
-                    response.data[dataCount++] = JVS_REPORT_NORMAL;
-                    response.data[dataCount++] = DEC2BCD(_info->cmdRev);
-                    #ifdef JVS_VERBOSE_CMD_PACKET
-                    DBG_SERIAL.print(F("START AT: "));
-                    DBG_SERIAL.println(dataCount-1);
-                    DBG_SERIAL.println(F("OUT: "));
-                    DBG_SERIAL.println(response.data[dataCount-1]);
-                    DBG_SERIAL.println(response.data[dataCount]);
-                    #endif
-                    break;
+                }
+                response.data[dataCount++] = 0;
+                #ifdef JVS_VERBOSE_CMD_PACKET
+                DBG_SERIAL.print(F("OUT: "));
+                DBG_SERIAL.println(response.dataString);
+                #endif
+                break;
 
-                case 0x12:
-                    // JVS Rev
-                    responseNeeded = true;
-                    response.data[dataCount++] = JVS_REPORT_NORMAL;
-                    response.data[dataCount++] = DEC2BCD(_info->jvsRev);
-                    #ifdef JVS_VERBOSE_CMD_PACKET
-                    DBG_SERIAL.print(F("START AT: "));
-                    DBG_SERIAL.println(dataCount-1);
-                    DBG_SERIAL.println(F("OUT: "));
-                    DBG_SERIAL.println(response.data[dataCount-1]);
-                    DBG_SERIAL.println(response.data[dataCount]);
-                    #endif
-                    break;
-    
-                case 0x13:
-                    // Comm Rev
-                    responseNeeded = true;
-                    response.data[dataCount++] = JVS_REPORT_NORMAL;
-                    response.data[dataCount++] = DEC2BCD(_info->comRev);
-                    #ifdef JVS_VERBOSE_CMD_PACKET
-                    DBG_SERIAL.print(F("START AT: "));
-                    DBG_SERIAL.println(dataCount-1);
-                    DBG_SERIAL.println(F("OUT: "));
-                    DBG_SERIAL.println(response.data[dataCount-1]);
-                    DBG_SERIAL.println(response.data[dataCount]);
-                    #endif
-                    break;
-                    
-                case 0x14:
-                    // Feature support
-                    // For some reason the english translation doesn't mention the feature codes are in BCD
-                    responseNeeded = true;
-                    response.data[dataCount++] = JVS_REPORT_NORMAL;
-                    for(int f = 0; f < _info->totalFeatures; f++){
-                        response.data[dataCount++] = DEC2BCD(_info->featureSupport[f]); // D 0
-                        response.data[dataCount++] = _info->featureParameters[f][0];    // D 1
-                        response.data[dataCount++] = _info->featureParameters[f][1];    // D 2
-                        response.data[dataCount++] = _info->featureParameters[f][2];    // D 3
-                        #ifdef JVS_VERBOSE_CMD_PACKET
-                        DBG_SERIAL.println(f);
-                        #endif
-                    }
-                    response.data[dataCount++] = 0;
-                    break;
+            case JVS_CMDREV_CODE:
+                // CMD Rev
+                #ifdef JVS_VERBOSE
+                DBG_SERIAL.println(F("JVS Recieved: Report Command version."));
+                #endif
+                responseNeeded = true;
+                response.data[dataCount++] = JVS_REPORT_NORMAL;
+                response.data[dataCount++] = DEC2BCD(_info->cmdRev);
+                #ifdef JVS_VERBOSE_CMD_PACKET
+                DBG_SERIAL.print(F("START AT: "));
+                DBG_SERIAL.println(dataCount-1);
+                DBG_SERIAL.println(F("OUT: "));
+                DBG_SERIAL.println(response.data[dataCount-1]);
+                DBG_SERIAL.println(response.data[dataCount]);
+                #endif
+                break;
 
-                case 0x15:
-                    // Main board ident, send ack
-                    responseNeeded = true;
-                    //memcpy(_info->mainID, received.dataString, 100);
-                    _info->mainID[99] = 0;  // Always set last byte to 
-                    response.statusCode = JVS_STATUS_UNKNOWNCMD;
-                    //response.data[dataCount++] = JVS_REPORT_NORMAL;
-                    #ifdef JVS_VERBOSE_CMD_PACKET
-                    DBG_SERIAL.print(F("IN: "));
-                    DBG_SERIAL.println(_info->mainID);
-                    #endif
-                    dataCount = 0;
-                    break;
+            case JVS_JVSREV_CODE:
+                #ifdef JVS_VERBOSE
+                DBG_SERIAL.println(F("JVS Recieved: Report JVS version."));
+                #endif
+                // JVS Rev
+                responseNeeded = true;
+                response.data[dataCount++] = JVS_REPORT_NORMAL;
+                response.data[dataCount++] = DEC2BCD(_info->jvsRev);
+                #ifdef JVS_VERBOSE_CMD_PACKET
+                DBG_SERIAL.print(F("START AT: "));
+                DBG_SERIAL.println(dataCount-1);
+                DBG_SERIAL.println(F("OUT: "));
+                DBG_SERIAL.println(response.data[dataCount-1]);
+                DBG_SERIAL.println(response.data[dataCount]);
+                #endif
+                break;
 
-                case 0x20:
+            case JVS_COMVER_CODE:
+                #ifdef JVS_VERBOSE
+                DBG_SERIAL.println(F("JVS Recieved: Report Comms. version."));
+                #endif
+                // Comm Rev
+                responseNeeded = true;
+                response.data[dataCount++] = JVS_REPORT_NORMAL;
+                response.data[dataCount++] = DEC2BCD(_info->comRev);
+                #ifdef JVS_VERBOSE_CMD_PACKET
+                DBG_SERIAL.print(F("START AT: "));
+                DBG_SERIAL.println(dataCount-1);
+                DBG_SERIAL.println(F("OUT: "));
+                DBG_SERIAL.println(response.data[dataCount-1]);
+                DBG_SERIAL.println(response.data[dataCount]);
+                #endif
+                break; 
+
+            case JVS_FEATCHK_CODE:
+                #ifdef JVS_VERBOSE
+                DBG_SERIAL.println(F("JVS Recieved: Report supported features."));
+                #endif
+                // Feature support
+                // For some reason the english translation doesn't mention the feature codes are in BCD
+                responseNeeded = true;
+                response.data[dataCount++] = JVS_REPORT_NORMAL;
+                for(int f = 0; f < _info->totalFeatures; f++){
+                    response.data[dataCount++] = DEC2BCD(_info->featureSupport[f]); // D 0
+                    response.data[dataCount++] = _info->featureParameters[f][0];    // D 1
+                    response.data[dataCount++] = _info->featureParameters[f][1];    // D 2
+                    response.data[dataCount++] = _info->featureParameters[f][2];    // D 3
+                    #ifdef JVS_VERBOSE_CMD_PACKET
+                    DBG_SERIAL.println(f);
+                    #endif
+                }
+                response.data[dataCount++] = 0;
+                break;
+
+            case JVS_MAINID_CODE:
+                // Main board ident, send ack
+                responseNeeded = true;
+                //memcpy(_info->mainID, received.dataString, 100);
+                _info->mainID[99] = 0;  // Always set last byte to 
+                response.statusCode = JVS_STATUS_UNKNOWNCMD;
+                //response.data[dataCount++] = JVS_REPORT_NORMAL;
+                #ifdef JVS_VERBOSE_CMD_PACKET
+                DBG_SERIAL.print(F("IN: "));
+                DBG_SERIAL.println(_info->mainID);
+                #endif
+                dataCount = 0;
+                break;
+
+                case JVS_READSWITCH_CODE:
                     // Read switch inputs
                     if(playerArray == NULL){
                         #ifdef JVS_ERROR
@@ -756,14 +894,14 @@ int JVS::runCommand(JVS_Frame &received){
                     }
                     responseNeeded = true;
 
-                    c++;
+                    c++;                        // Get next data byte
                     temp = received.data[c++];  // How many players to read
                     if(temp > _info->featureParameters[featureLoc[switchInput]][0]) {
                         errorCode = 1;
                     }
 
-                    tempB = received.data[c++];  // How many bytes per player
-                    if(tempB > (1 * (_info->featureParameters[featureLoc[gpOutput]][1] / 8) + 1)){
+                    tempB = received.data[c];  // How many bytes per player
+                    if(tempB > (1 * (_info->featureParameters[featureLoc[switchInput]][1] / 8) + 1)){
                         errorCode = 1;
                     } else {
                         response.data[dataCount++] = JVS_REPORT_NORMAL; // Byte 0 report
@@ -776,6 +914,7 @@ int JVS::runCommand(JVS_Frame &received){
                                 response.data[dataCount++] = playerArray[b + tempC];
                             }
                         }
+                        errorCode = 0;
                     }
 
                     if(errorCode){
@@ -786,7 +925,8 @@ int JVS::runCommand(JVS_Frame &received){
                         errorCode = 0;
                     }
                     break;
-                case 0x21:
+            
+            case JVS_READCOIN_CODE:
                     // Read coin inputs
                     if(coinSlots == NULL || coinCondition == NULL){
                         #ifdef JVS_ERROR
@@ -806,10 +946,15 @@ int JVS::runCommand(JVS_Frame &received){
 
                         response.data[dataCount++] = JVS_REPORT_NORMAL; // Byte 0 report
 
-                        for(int p = 0; p < temp; p++){
-                            // Coin slot number
+                        for(uint16_t p = 0; p < temp; p++){
+                            // Coin slot condition
+                            tempC = (JVS_COIN_NORMAL << 6);
+                            if(coinCondition != nullptr){
+                                tempC = (coinCondition[p] << 6); 
+                            }
+                            // Coin slot count
                             if(coinSlots != nullptr){
-                                response.data[dataCount++] = highByte(coinSlots[p]);
+                                response.data[dataCount++] = (tempC | (highByte(coinSlots[p]) & 0x3F));
                                 response.data[dataCount++] = lowByte(coinSlots[p]);
                             } else {
                                 response.data[dataCount++] = 0;
@@ -818,8 +963,8 @@ int JVS::runCommand(JVS_Frame &received){
                         }
                     }
                     break;
-                case 0x30:
-                    // Decrease coin counter
+                case JVS_COINDECREASE_CODE:
+                    // Decrease coin counter (the credit count, NOT the coin counter of the cabinet)
                     if(coinSlots == NULL || coinCondition == NULL){
                         #ifdef JVS_ERROR
                         DBG_SERIAL.println("JVS Error: Host requested coins, coin slots/condition array is NULL!");
@@ -827,15 +972,35 @@ int JVS::runCommand(JVS_Frame &received){
                         return -4;
                     }
                     responseNeeded = true;
-
-                        index = received.data[c++];
-                        temp = (received.data[c++] << 8);
-                        temp &= (received.data[c]);
-                        *(coinSlots + index) -= temp;
+                    c++;
+                    _idx = received.data[c++];
+                    if(_idx > findFeatureParam(coinInput, 0)){
+                        // Check the slots
+                        response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;    
+                    } else if ((received.numBytes - 1) < 2){
+                        // Not enough data in packet to fufill command
+                        response.data[dataCount++] = JVS_REPORT_DATAERROR;
+                    } else {
                         response.data[dataCount++] = JVS_REPORT_NORMAL;
+                        temp = (received.data[c++] << 8);
+                        temp |= received.data[c];
+                        if(temp > coinSlots[_idx - 1]){
+                            coinSlots[_idx - 1] = 0;
+                        } else {
+                            coinSlots[_idx - 1] -= temp;
+                        }
+                        #ifdef JVS_VERBOSE_CMD
+                        DBG_SERIAL.print(_idx);
+                        DBG_SERIAL.print(": ");
+                        DBG_SERIAL.print(coinSlots[_idx - 1]);
+                        DBG_SERIAL.print(" - ");
+                        DBG_SERIAL.println(temp);
+                        #endif
+                    }
                     break;
-                case 0x35:
-                    // Increase coin counter
+                    
+                case JVS_COININCREASE_CODE:
+                    // Increase coin counter (the credit count, NOT the coin counter of the cabinet)
                     if(coinSlots == NULL || coinCondition == NULL){
                         #ifdef JVS_ERROR
                         DBG_SERIAL.println("JVS Error: Host requested coins, coin slots/condition array is NULL!");
@@ -843,14 +1008,31 @@ int JVS::runCommand(JVS_Frame &received){
                         return -4;
                     }
                     responseNeeded = true;
-
-                        index = received.data[c++];
-                        temp = (received.data[c++] << 8);
-                        temp &= received.data[c];
-                        *(coinSlots + index) -= temp;
+                    c++;
+                    _idx = received.data[c++];
+                    if(_idx > findFeatureParam(coinInput, 0)){
+                        // Check the slots
+                        response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;    
+                    } else if ((received.numBytes - 1) < 2){
+                        // Not enough data in packet to fufill command
+                        response.data[dataCount++] = JVS_REPORT_DATAERROR;
+                    } else {
                         response.data[dataCount++] = JVS_REPORT_NORMAL;
+                        temp = (received.data[c++] << 8);
+                        temp |= received.data[c];
+                        coinSlots[_idx - 1] += temp;
+
+                        #ifdef JVS_VERBOSE_CMD
+                        DBG_SERIAL.print(_idx);
+                        DBG_SERIAL.print(": ");
+                        DBG_SERIAL.print(coinSlots[_idx - 1]);
+                        DBG_SERIAL.print(" + ");
+                        DBG_SERIAL.println(temp);
+                        #endif
+                    }
                     break;
-                case 0x32:
+
+                case JVS_GENERICOUT1_CODE:
                     // GPO 1
                     if(outputSlots == NULL){
                         #ifdef JVS_ERROR
@@ -858,10 +1040,19 @@ int JVS::runCommand(JVS_Frame &received){
                         #endif
                         return -5;
                     }
+                    #ifdef JVS_VERBOSE_CMD
+                        DBG_SERIAL.print("JVS: runCommand(0x32): Output data: ");
+                        for(int i = 1; i < received.numBytes - 1; i++){
+                            DBG_SERIAL.print(received.data[i], HEX);
+                            DBG_SERIAL.print(" ");
+                        }
+                        DBG_SERIAL.println();
+                        #endif
+
                     responseNeeded = true;
                     c++;
-                    temp = received.data[c++];
                     tempB = 0;
+                    
                     for(int x = 0; x < findFeatureParam(gpOutput, 0); x += 8){
                         tempB++;
                     }
@@ -870,12 +1061,12 @@ int JVS::runCommand(JVS_Frame &received){
                         response.data[dataCount++] = JVS_REPORT_PARAMETERERROR;
                     } else {
                         response.data[dataCount++] = JVS_REPORT_NORMAL;
-                        for(int o = 0; o < temp; o++){
+                        for(uint16_t o = 0; o < (uint16_t)tempB; o++){
                             outputSlots[o] = received.data[c++];
                         }
                     }
                     break;
-                case 0x2F:
+                case JVS_DATARETRY_CODE:
                     // Host was not happy with the packet, resend
                     responseNeeded = false; // We need to send a specific packet back
                     write(_lastSent);
@@ -901,11 +1092,12 @@ int JVS::runCommand(JVS_Frame &received){
 
         if(responseNeeded == true){
             if(!errorCode) { response.numBytes = dataCount; }
-            write(response);
             #ifdef JVS_VERBOSE
+            DBG_SERIAL.print(F("JVS: runCommand: Send reply to: "));
             DBG_SERIAL.println(received.data[0], HEX);
-            DBG_SERIAL.println(F("SEND"));
             #endif
+            JVS_Frame reply(response.nodeID, response.numBytes, response.data, response.statusCode, false, true);
+            write(reply);
         }
     return errorCode;
 }
@@ -918,7 +1110,7 @@ int JVS::available (void) {
 void JVS::setSense(bool s){
     #ifdef JVS_VERBOSE
     DBG_SERIAL.print(F("JVS: SENSE OUT: "));
-    if(s == JVS_SENSE_ACTIVE){
+    if(s){
         DBG_SERIAL.println("0V");
         digitalWrite(senseOutPin, HIGH);
     }   else {
@@ -926,7 +1118,8 @@ void JVS::setSense(bool s){
         digitalWrite(senseOutPin, LOW);
     }
     #else
-    if(s == JVS_SENSE_ACTIVE){
+    if(useUSB) return;
+    else if(s){
         // Set sense output to active
         digitalWrite(senseOutPin, HIGH);
     } else {
@@ -936,11 +1129,12 @@ void JVS::setSense(bool s){
 }
 
 // Calculate JVS packet checksum
-uint8_t JVS::calculateSum(JVS_Frame &_f, bool send){
+/*
+uint8_t JVS::calculateSum(JVS_Frame &_f, bool _host, bool _send){
     uint32_t _s = 0;
     _s += _f.nodeID;
     _s += _f.numBytes;
-    if((!isHost && send) || (isHost && !send)){
+    if((!_host && _send) || (_host && !_send)){
         _s += _f.statusCode;
     }
 
@@ -949,7 +1143,7 @@ uint8_t JVS::calculateSum(JVS_Frame &_f, bool send){
     }
     _s = (_s % 256);
     return _s;
-}
+}*/
 
 /* Host mode JVS commands */
 
@@ -972,7 +1166,7 @@ void JVS::writeOutputs(uint8_t id, uint8_t data){
         out.numBytes = 3;
         out.data[0] = JVS_GENERICOUT1_CODE;
         out.data[1] = 1;
-        out.data[2] = reverse(data);
+        out.data[2] = reverse(data);    // Why reverse?
         write(out);
     }
 }

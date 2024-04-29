@@ -20,17 +20,19 @@
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
-#include <jvs_message.h>
+#include "usb_api.h"
+#include "jvs_message.h"
 //#include <jvs_commands.h>
 
 
 // Debugging tools: Use with caution as they may break comms with some hosts
-#define DBG_SERIAL Serial           // CHANGE THIS or disable logging if you do not want debug output on this port.
-//#define JVS_VERBOSE       // Enables library logging, but might break comms when running as device
-#define JVS_ERROR
+//#define DBG_SERIAL Serial1           // CHANGE THIS or disable logging if you do not want debug output on this port.
+//#define JVS_VERBOSE               // Enables library logging, but might break comms when running as device
+//#define JVS_ERROR
 //#define JVS_VERBOSE_LOG_FRAME     // Enables frame logging but will break comms with certain hosts
 //#define JVS_VERBOSE_LOG_CMG       // Same as above but for command packet decoder
 //#define JVS_VERBOSE_CMD
+//#define JVS_VERBOSE_CMD_PACKET
 
 #ifdef JVS_VERBOSE
 #warning "JVS Verbose mode is enabled. You may experience communication issues or disconnects when running in device mode!"
@@ -52,9 +54,6 @@
 #ifndef JVS_BUFFER_SIZE
 #define JVS_BUFFER_SIZE 1
 #endif
-
-#define JVS_SENSE_INACTIVE  0
-#define JVS_SENSE_ACTIVE    1
 
 #define HOST_NODE           1
 #define DEVICE_NODE         0
@@ -164,20 +163,123 @@ struct JVS_Controls {
     byte coin4[2] = {0,0};
 };
 
+/*
+// FIFO buffers
+class FIFO_Buffer{
+        private:
+        uint8_t *_buff = nullptr;
+        uint16_t _head, _tail, _count, _capacity;
+        bool _overflow = false;
+
+        public:
+        FIFO_Buffer(){
+            _buff = new uint8_t[64];
+            if(_buff != nullptr){
+                _head = 0;
+                _tail = 0;
+                _count = 0;
+                _capacity = 64;
+            }
+        }
+        FIFO_Buffer(uint8_t *_b, uint16_t _s){
+            if(_b != nullptr){
+                _buff = _b;
+                _head = 0;
+                _tail = 0;
+                _count = 0;
+                _capacity = _s;
+            }
+        }
+
+        uint8_t pop(){
+            if(_head < _capacity && _head != _tail){
+                return _buff[_head++];
+            }
+            _count--;
+            return 0;
+        }
+        void pop(uint8_t *d, uint16_t s, uint16_t o = 0){
+            for (uint16_t i = o; (i < (s + 0) || _count > 0); i++){
+                d[i] = _buff[_head];
+                if(_head + 1 < _capacity) _head++;
+                else _head = 0;
+                _count--;
+            }
+        }
+        bool bufferOverflow(){
+            return _overflow;
+        }
+        uint16_t first(){
+            return _head;
+        }
+        uint16_t last(){
+            return _tail;
+        }
+        uint8_t peek(){
+            return _buff[_head];
+        }
+        uint16_t size(){
+            return _count;
+        }
+        void push(uint8_t d){
+            if(!_overflow){
+                _buff[_tail] = d;
+                if(_tail + 1 < _capacity) _tail++;
+                else _tail = 0;
+            }
+            if(_tail == _head) _overflow = true;
+            _count++;
+        }
+        void push(uint8_t *d, uint16_t s, uint16_t o = 0){
+            if(!_overflow){
+                for (uint16_t i = o; i < (s + o); i++){
+                    _buff[_tail] = d[i];
+                    if(_tail + 1 < _capacity) _tail++;
+                    else _tail = 0;
+                    _count++;
+                    if(_tail == _head) {
+                        _overflow = true;
+                        break;
+                    }
+                }
+            }
+        }
+        uint16_t available(){
+            if (_head >= _tail)
+                return _head - _tail;
+            else
+                return _capacity - _tail + _head;
+        }
+        void clear(){
+            memset(_buff, 0, _capacity);
+        }
+    };
+    */
 
 class JVS {
     public:
-    //JVS(HardwareSerial &_ser, int _sense, int _rts);                  // Legacy
-    //JVS(HardwareSerial &_ser, int _sense, int _rts, int _senseIn);    // Legacy
-    JVS(HardwareSerial &_ser, bool m, int _rts, int _senseA, int _senseB = 255);
+    enum JVS_SensePinStates {
+        JVS_SENSE_DISCONNECTED,
+        JVS_SENSE_PRESENT,
+        JVS_SENSE_READY
+    };
 
-    uint8_t nodeID;                // This node's ID
+    enum JVS_SensePins {
+        JVS_SENSE_IN,
+        JVS_SENSE_OUT
+    };
 
-    void reset();
-    void sendReset();               // Send reset request out. Only host can initiate this
-    void setInfo(JVS_Info &in) { _info = &in; }
-    void sendStatus(int s);
-    void sendReport(int s, int r);
+    JVS(HardwareSerial &_ser, bool m, int _rts, int _senseA, int _senseB = 255, int _ioConnect = 255);
+    JVS(usb_serial_class &_ser, bool m);
+    JVS(usb_serial_class &_ser, bool m, bool _USEBETA);
+    //JVS(FIFO_Buffer &_rx, FIFO_Buffer &_tx, bool _m);
+
+    uint8_t nodeID = 254;                // This node's ID
+
+    void resetNode();
+    int sendReset();               // Send reset request out. Only host can initiate this
+
+    int sendStatus(int s);
 
     void setMachineArray(byte *arr) { machineSwitches = arr; }
     void setPlayerArray(byte *arr) { playerArray = arr; }
@@ -185,16 +287,31 @@ class JVS {
     void setCoinArray(uint16_t *arr) { coinSlots = arr; }
     void setCoinMechArray(byte *arr) { coinCondition = arr; }
     void setOutputArray(byte *arr) { outputSlots = arr; }
+    void setSenseOutState(JVS_SensePinStates _s){
+        senseOutState = _s;
+        if(classOpMode == useUART){
+            if(_s == JVS_SENSE_READY){ setSense(true); }
+            else { setSense(false); }
+        }
+    }
+    JVS_SensePinStates getSenseInState(){
+        return senseOutState;
+    }
 
     int begin(unsigned long _b = JVS_DEFAULT_BUAD);
     int available();
     int initHost();
+    int initDevice(JVS_Info &in);
     int initDevice();
     int write(JVS_Frame &_frame);
     int read(JVS_Frame &_frame);
+    JVS_Frame waitForReply();
     int update();
     int runCommand();
     int runCommand(JVS_Frame &_b);
+
+    //FIFO_Buffer *getTxBuffer() { return _txBuff; }
+    bool txAvailable(){ return txFlag; }
 
     uint8_t findFeatureParam(featureTypes t, uint8_t p) {
         // Returns parameter for given feature. IE asking for parameter 0 for gpOutputs will return number of outputs
@@ -233,14 +350,25 @@ class JVS {
     void writeOutputBit(uint8_t id, uint16_t idx, uint8_t data);    // Write to outputs using GPO3 command
 
     private:
+    //FIFO_Buffer *_rxBuff, *_txBuff;
+    
+    JVS_SensePinStates senseInState, senseOutState;
 
-    //CircularBuffer<JVS_Frame,JVS_BUFFER_SIZE> rxbuffer;   // RX FIFO buffer. Read it fast enough and might not be even needed
     bool rxFlag = false;
+    bool txFlag = false;
     JVS_Frame rxbuffer;
     JVS_Frame _lastSent;
+
+    enum OperationMode {
+        useUART,
+        useUSB,
+        useBUFFER
+    } classOpMode;
+
     HardwareSerial* _serial;        // Hardware serial port to use
+    usb_serial_class* _usb;         // USB Serial
+
     JVS_Info*   _info = NULL;              // Pointer to the information array
-    //JVS_Frame   _outgoingFrame;     // JVS frame to send out
 
     // IO
     uint8_t* machineSwitches = NULL;       // Button storage for cab switches: 
@@ -268,14 +396,18 @@ class JVS {
     uint8_t devicesAvailable = 0;     // How many JVS devices are in the chain
     int senseOutPin;                  // Sense pin is connected to a 2N2222 transistor.
     int senseInPin;                // Input sense pin for connecting to downstream IOs
+    int ioConnectedPin;             // Use this to tell the library specifically when an IO board is connected but has no ID (must be true if sense line is 2.5v or 0v)
     int rtsPin;                    // Pin for MAX485 transmit enable
     uint8_t featureLoc[32];        // Where the parameters for each feature is stored.
 
     void setSense(bool s);          // Set the sene pin's output. Only slave should do this, host is read-only
-    int  setAddress();
+    int  _queryNodes();
+    int _waitForBytes(uint16_t totalBytes, uint16_t _tO = 1000);
     uint8_t setID(uint8_t id);          // Sets this node's ID, returns current ID
-    uint8_t calculateSum(JVS_Frame &_f, bool send = false);
-    int readFrame();
+    //int8_t calculateSum(JVS_Frame &_f, bool _h = false, bool _s = false);
+
+    int readFrame(bool doRetry = true, uint8_t index = 0);
+    int writeFrame(JVS_Frame &_frame);
 
     unsigned char reverse(unsigned char b) {
         b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
@@ -283,7 +415,5 @@ class JVS {
         b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
         return b;
     }
-
-    uint32_t lastSent;
 };
 #endif
